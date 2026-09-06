@@ -2,10 +2,11 @@
 #define APP_H
 
 #include "Module.h"
+#include "CoreConfig.h"
 
 class App {
 public:
-    static const int MAX_MODULES = 15;  // Public for tests
+    static const int MAX_MODULES = CoreConfig::MAX_MODULES;  // Public for tests
 
 private:
     Module* modules[MAX_MODULES];

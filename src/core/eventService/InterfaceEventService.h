@@ -1,26 +1,15 @@
 #pragma once
+#include "EventType.h"
 #include <functional>
-#include <map>
-#include <vector>
-#include <string>
 
 using EventCallback = std::function<void(const void*)>;
 
-class EventService {
+// Abstract interface for the event service.
+// Use this for dependency injection and test mocking.
+class IEventService {
 public:
-    static EventService& instance() {
-        static EventService svc;
-        return svc;
-    }
-
-    void subscribe(const std::string& event, EventCallback cb) {
-        _listeners[event].push_back(cb);
-    }
-
-    void publish(const std::string& event, const void* data = nullptr) {
-        for (auto& cb : _listeners[event]) cb(data);
-    }
-
-private:
-    std::map<std::string, std::vector<EventCallback>> _listeners;
+    virtual ~IEventService() = default;
+    virtual bool subscribe(EventType type, EventCallback cb) = 0;
+    virtual void publish(EventType type, const void* data = nullptr) = 0;
+    virtual void reset() = 0;
 };

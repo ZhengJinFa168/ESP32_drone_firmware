@@ -2,11 +2,21 @@
 #define MODULE_H
 
 #include <Arduino.h>
+#include "eventService/EventService.h"
 
 class Module {
 protected:
     String name;
     bool enabled;
+
+    // Convenience methods for event communication
+    void publish(EventType type, const void* data = nullptr) {
+        EventService::instance().publish(type, data);
+    }
+
+    bool subscribe(EventType type, EventCallback cb) {
+        return EventService::instance().subscribe(type, cb);
+    }
 
 public:
     Module(const String& n) : name(n), enabled(true) {}

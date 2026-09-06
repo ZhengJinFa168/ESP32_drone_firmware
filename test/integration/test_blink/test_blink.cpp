@@ -3,36 +3,7 @@
 #include "core/App.h"
 #include "core/Module.h"
 
-// ============================================
-// BLINK MODULE (same as in main.cpp)
-// ============================================
-class BlinkModule : public Module {
-private:
-    int pin;
-    unsigned long lastToggle;
-    int intervalMs;
-
-public:
-    BlinkModule(int p, int interval)
-        : Module("BLINK"), pin(p), intervalMs(interval), lastToggle(0) {}
-
-    void setup() override {
-        pinMode(pin, OUTPUT);
-        digitalWrite(pin, LOW);
-    }
-
-    void loop() override {
-        unsigned long now = millis();
-        if (now - lastToggle >= intervalMs) {
-            digitalWrite(pin, !digitalRead(pin));
-            lastToggle = now;
-        }
-    }
-
-    bool isPinHigh() const {
-        return digitalRead(pin) == HIGH;
-    }
-};
+#include "modules/actuators/blink/BlinkModule.h"
 
 // ============================================
 // TEST FIXTURE

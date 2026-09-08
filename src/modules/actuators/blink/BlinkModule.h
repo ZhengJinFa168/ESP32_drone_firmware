@@ -8,6 +8,12 @@ private:
     int intervalMs;
     unsigned long lastToggle;
 
+    // Static C-style callback for heartbeat-driven blink
+    static void onHeartbeat(void* ctx, const void*) {
+        auto* self = static_cast<BlinkModule*>(ctx);
+        digitalWrite(self->pin, !digitalRead(self->pin));
+    }
+
 public:
     // interval == 0: event-driven via EventType::HEARTBEAT
     // interval > 0: autonomous periodic blinking in loop()
@@ -19,9 +25,7 @@ public:
         digitalWrite(pin, LOW);
 
         if (intervalMs == 0) {
-            subscribe(EventType::HEARTBEAT, [this](const void*) {
-                digitalWrite(pin, !digitalRead(pin));
-            });
+            subscribe(EventType::HEARTBEAT, onHeartbeat);
         }
     }
 
@@ -39,4 +43,3 @@ public:
         return digitalRead(pin) == HIGH;
     }
 };
-

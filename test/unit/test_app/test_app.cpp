@@ -19,7 +19,7 @@ public:
     MockModule() : Module("Mock"), setupCalled(false), loopCalled(false), loopCount(0) {}
 
     // Constructor with custom name
-    MockModule(const String& name)
+    MockModule(const char* name)
         : Module(name), setupCalled(false), loopCalled(false), loopCount(0) {}
 
     void setup() override {
@@ -54,8 +54,8 @@ void test_app_registers_modules() {
     testApp.registerModule(&m2);
     
     TEST_ASSERT_EQUAL(2, testApp.getModuleCount());
-    TEST_ASSERT_EQUAL_STRING("Module1", testApp.getModule(0)->getName().c_str());
-    TEST_ASSERT_EQUAL_STRING("Module2", testApp.getModule(1)->getName().c_str());
+    TEST_ASSERT_EQUAL_STRING("Module1", testApp.getModule(0)->getName());
+    TEST_ASSERT_EQUAL_STRING("Module2", testApp.getModule(1)->getName());
 }
 
 void test_app_setup_calls_setup_on_all_modules() {

@@ -10,12 +10,12 @@ public:
     TestEventModule() : Module("TestEventModule") {}
 
     void setup() override {
-        subscribe(EventType::HEARTBEAT, [this](const void*) {
-            heartbeatCount++;
+        subscribe(EventType::HEARTBEAT, [](void* ctx, const void*) {
+            static_cast<TestEventModule*>(ctx)->heartbeatCount++;
         });
     }
 
-    void loop() override {}
+    // loop() not needed — uses default empty base implementation
 
     void sendHeartbeat() {
         publish(EventType::HEARTBEAT, nullptr);
@@ -32,9 +32,9 @@ void tearDown() {
 
 void test_subscribe_and_publish() {
     bool callbackFired = false;
-    EventService::instance().subscribe(EventType::HEARTBEAT, [&callbackFired](const void*) {
-        callbackFired = true;
-    });
+    EventService::instance().subscribe(EventType::HEARTBEAT, [](void* ctx, const void*) {
+        *static_cast<bool*>(ctx) = true;
+    }, &callbackFired);
 
     EventService::instance().publish(EventType::HEARTBEAT);
     TEST_ASSERT_TRUE(callbackFired);
@@ -44,12 +44,12 @@ void test_multiple_subscribers() {
     int count1 = 0;
     int count2 = 0;
 
-    EventService::instance().subscribe(EventType::HEARTBEAT, [&count1](const void*) {
-        count1++;
-    });
-    EventService::instance().subscribe(EventType::HEARTBEAT, [&count2](const void*) {
-        count2++;
-    });
+    EventService::instance().subscribe(EventType::HEARTBEAT, [](void* ctx, const void*) {
+        (*static_cast<int*>(ctx))++;
+    }, &count1);
+    EventService::instance().subscribe(EventType::HEARTBEAT, [](void* ctx, const void*) {
+        (*static_cast<int*>(ctx))++;
+    }, &count2);
 
     EventService::instance().publish(EventType::HEARTBEAT);
     TEST_ASSERT_EQUAL(1, count1);
@@ -60,12 +60,12 @@ void test_different_event_types() {
     bool imuFired = false;
     bool armedFired = false;
 
-    EventService::instance().subscribe(EventType::IMU_RAW, [&imuFired](const void*) {
-        imuFired = true;
-    });
-    EventService::instance().subscribe(EventType::ARMED, [&armedFired](const void*) {
-        armedFired = true;
-    });
+    EventService::instance().subscribe(EventType::IMU_RAW, [](void* ctx, const void*) {
+        *static_cast<bool*>(ctx) = true;
+    }, &imuFired);
+    EventService::instance().subscribe(EventType::ARMED, [](void* ctx, const void*) {
+        *static_cast<bool*>(ctx) = true;
+    }, &armedFired);
 
     EventService::instance().publish(EventType::IMU_RAW);
     TEST_ASSERT_TRUE(imuFired);
@@ -76,37 +76,38 @@ void test_different_event_types() {
 }
 
 void test_publish_with_data() {
-    ImuData receivedData{};
-    bool received = false;
+    struct Ctx { ImuData data{}; bool received = false; };
+    Ctx ctx;
 
-    EventService::instance().subscribe(EventType::IMU_RAW, [&receivedData, &received](const void* data) {
+    EventService::instance().subscribe(EventType::IMU_RAW, [](void* c, const void* data) {
         if (data) {
-            receivedData = *static_cast<const ImuData*>(data);
-            received = true;
+            auto* ctx = static_cast<Ctx*>(c);
+            ctx->data = *static_cast<const ImuData*>(data);
+            ctx->received = true;
         }
-    });
+    }, &ctx);
 
     ImuData sendData{1.0f, 2.0f, 9.81f, 0.1f, -0.2f, 0.05f};
     EventService::instance().publish(EventType::IMU_RAW, &sendData);
 
-    TEST_ASSERT_TRUE(received);
-    TEST_ASSERT_EQUAL_FLOAT(1.0f, receivedData.ax);
-    TEST_ASSERT_EQUAL_FLOAT(2.0f, receivedData.ay);
-    TEST_ASSERT_EQUAL_FLOAT(9.81f, receivedData.az);
-    TEST_ASSERT_EQUAL_FLOAT(0.1f, receivedData.gx);
-    TEST_ASSERT_EQUAL_FLOAT(-0.2f, receivedData.gy);
-    TEST_ASSERT_EQUAL_FLOAT(0.05f, receivedData.gz);
+    TEST_ASSERT_TRUE(ctx.received);
+    TEST_ASSERT_EQUAL_FLOAT(1.0f, ctx.data.ax);
+    TEST_ASSERT_EQUAL_FLOAT(2.0f, ctx.data.ay);
+    TEST_ASSERT_EQUAL_FLOAT(9.81f, ctx.data.az);
+    TEST_ASSERT_EQUAL_FLOAT(0.1f, ctx.data.gx);
+    TEST_ASSERT_EQUAL_FLOAT(-0.2f, ctx.data.gy);
+    TEST_ASSERT_EQUAL_FLOAT(0.05f, ctx.data.gz);
 }
 
 void test_max_listeners_exceeded() {
     // MAX_LISTENERS_PER_EVENT is 4
     for (int i = 0; i < EventService::MAX_LISTENERS_PER_EVENT; i++) {
-        bool ok = EventService::instance().subscribe(EventType::HEARTBEAT, [](const void*) {});
+        bool ok = EventService::instance().subscribe(EventType::HEARTBEAT, [](void*, const void*) {});
         TEST_ASSERT_TRUE(ok);
     }
 
     // 5th listener should fail
-    bool fifthOk = EventService::instance().subscribe(EventType::HEARTBEAT, [](const void*) {});
+    bool fifthOk = EventService::instance().subscribe(EventType::HEARTBEAT, [](void*, const void*) {});
     TEST_ASSERT_FALSE(fifthOk);
 }
 
@@ -118,9 +119,9 @@ void test_publish_without_subscribers() {
 
 void test_reset_clears_subscriptions() {
     int calls = 0;
-    EventService::instance().subscribe(EventType::HEARTBEAT, [&calls](const void*) {
-        calls++;
-    });
+    EventService::instance().subscribe(EventType::HEARTBEAT, [](void* ctx, const void*) {
+        (*static_cast<int*>(ctx))++;
+    }, &calls);
 
     EventService::instance().publish(EventType::HEARTBEAT);
     TEST_ASSERT_EQUAL(1, calls);
@@ -162,4 +163,3 @@ int main() {
 
     return UNITY_END();
 }
-

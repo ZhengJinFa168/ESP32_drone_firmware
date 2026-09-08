@@ -11,6 +11,7 @@
 #define LED_BUILTIN 2
 
 inline unsigned long millis() { return 0; }
+inline unsigned long micros() { return 0; }
 inline void delay(unsigned long) {}
 inline void pinMode(int, int) {}
 inline void digitalWrite(int, int) {}

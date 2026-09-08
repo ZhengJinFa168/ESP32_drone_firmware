@@ -6,31 +6,33 @@
 
 class Module {
 protected:
-    String name;
+    const char* name;
     bool enabled;
 
-    // Convenience methods for event communication
+    // Convenience wrappers: automatically passes 'this' as context.
     void publish(EventType type, const void* data = nullptr) {
         EventService::instance().publish(type, data);
     }
 
     bool subscribe(EventType type, EventCallback cb) {
-        return EventService::instance().subscribe(type, cb);
+        return EventService::instance().subscribe(type, cb, this);
     }
 
 public:
-    Module(const String& n) : name(n), enabled(true) {}
+    explicit Module(const char* n) : name(n), enabled(true) {}
     virtual ~Module() {}
 
-    // Pure virtual – every module must implement these
+    // Pure virtual – every module must implement setup
     virtual void setup() = 0;
-    virtual void loop() = 0;
+
+    // Default empty loop — event-driven modules don't need to override this
+    virtual void loop() {}
 
     // Utility methods
     void enable() { enabled = true; }
     void disable() { enabled = false; }
     bool isEnabled() const { return enabled; }
-    String getName() const { return name; }
+    const char* getName() const { return name; }
 };
 
 #endif

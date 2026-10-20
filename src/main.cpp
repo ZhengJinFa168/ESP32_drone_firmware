@@ -4,6 +4,7 @@
 #include "modules/logic/heartbeat/HeartbeatModule.h"
 #include "modules/logic/attitude_estimator/AttitudeEstimatorModule.h"
 #include "modules/sensors/bmi_imu/BMI270/Bmi270Module.h"
+#include "modules/communication/rc_input/RcInputModule.h"
 
 // Define the drone's specific attitude module using the configured filter
 using DroneAttitudeEstimator = AttitudeEstimatorModule<ActiveAttitudeFilter>;
@@ -18,6 +19,7 @@ void setup() {
     drone.registerModule(new BlinkModule(LED_BUILTIN));
     drone.registerModule(new Bmi270Module());
     drone.registerModule(new DroneAttitudeEstimator(0.98f));
+    drone.registerModule(new RcInputModule());
     drone.setup();
     Serial.println("System Running!");
 }

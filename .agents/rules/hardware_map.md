@@ -48,6 +48,7 @@ Legend: **[TO VERIFY]** = wired but not yet confirmed on hardware. **[TO DECIDE]
 - **I2C SCL**: G22
 - **Power**: 3V3, GND
 - **I2C Address**: **[TO VERIFY]** — expected 0x68 (SDO tied to GND; code uses `BMI2_I2C_PRIM_ADDR`). The diagram marks two pins as "SDO"; confirm which pin on the real board is SDO and which is CS. 0x69 if SDO is high.
+- **Mounting alignment**: `Align::CW0` (default, sensor axes = body axes) **[TO VERIFY]** — set in `src/config/SensorConfig.h` after mounting (see End-of-Build Checklist).
 - **INT pin**: not connected (planned: data-ready interrupt to drive the flight loop)
 
 ## Barometer
@@ -71,6 +72,17 @@ Legend: **[TO VERIFY]** = wired but not yet confirmed on hardware. **[TO DECIDE]
 
 ## Misc
 - **Status LED**: G2 (onboard LED)
+
+## End-of-Build Checklist
+Everything is developed in the body frame (FLU) and Betaflight motor layout. These hardware facts are confirmed only after final assembly, and each one gates arming or first flight:
+1. **IMU alignment** (gravity test on the mounted sensor, still, in Teleplot or serial output):
+   - Nose pointing up → the sensor axis reading +1 g is the body forward axis (−1 g = it points backward).
+   - Left side pointing up → the sensor axis reading +1 g is the body left axis.
+   - Flat, chip side up/down → which sensor axis reads ±1 g is body up.
+   - Set `IMU_ALIGNMENT` in `src/config/SensorConfig.h`, re-run the test (body readings: nose up → `ax = +1`, left up → `ay = +1`, level → `az = +1`), then set `IMU_ALIGNMENT_VERIFIED = true`.
+2. **Motor order and spin direction** — props off, one motor at a time; confirm against the Motors table.
+3. **ESC protocol** — decide and configure (see Motors / ESCs).
+4. **Battery sensing pins** — wire the VBAT divider and CURR, record the ADC1 pins.
 
 ## Pins to Avoid / Constraints
 - **Flash pins — never use**: G6–G11 (CLK, SD0, SD1, SD2, SD3, CMD)

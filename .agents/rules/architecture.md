@@ -15,6 +15,14 @@ This document describes the high-level architecture of the ESP32 drone firmware.
 - Downstream modules (like `AttitudeEstimatorModule`) `subscribe()` to these events, compute their math inside the callback, and `publish()` subsequent events (like `ATTITUDE_UPDATED`).
 - The `Module::loop()` function is available for periodic tasks (like a Heartbeat), but rapid control loops should chain off event callbacks to minimize latency.
 
+## Body Frame Convention
+- All modules downstream of the IMU work in the **body frame, FLU**: X forward, Y left, Z up (ROS REP-103).
+  - Level and still: accelerometer reads `az = +1 g`.
+  - Angles: roll + = right side down, pitch + = nose down, yaw + = nose left (counter-clockwise from above).
+  - Rates: right-hand rule about each axis.
+- Sensor modules rotate their readings into the body frame **before** publishing (`applyAlignment` in `src/utils/AxisAlignment.h`, configured in `src/config/SensorConfig.h`). No other module may depend on how a sensor is mounted.
+- The mounting alignment is set and verified at the end of the build (see "End-of-Build Checklist" in `hardware_map.md`). Arming must be refused while `IMU_ALIGNMENT_VERIFIED` is false.
+
 ## Event Types & Structs
 When passing data, use the existing structs in `EventType.h`:
 - `ImuData` (ax, ay, az, gx, gy, gz)

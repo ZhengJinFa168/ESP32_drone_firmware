@@ -6,7 +6,7 @@
 // ============================================
 enum class EventType : uint8_t {
     // Sensor events
-    IMU_RAW,            // Raw accel + gyro data
+    IMU_RAW,            // Accel + gyro, already rotated into the body frame (FLU)
 
     // Estimation events
     ATTITUDE_UPDATED,   // Roll, pitch, yaw angles
@@ -29,13 +29,14 @@ enum class EventType : uint8_t {
 // ============================================
 // EVENT DATA STRUCTS (POD types)
 // ============================================
+// Body frame FLU: X forward, Y left, Z up. Level and still: az = +1 g.
 struct ImuData {
     float ax, ay, az;   // Accelerometer (g)
     float gx, gy, gz;   // Gyroscope (deg/s)
 };
 
 struct AttitudeData {
-    float roll, pitch, yaw;  // Euler angles (deg)
+    float roll, pitch, yaw;  // Euler angles (deg), FLU: roll + = right side down, pitch + = nose down, yaw + = nose left
 };
 
 struct RcInputData {

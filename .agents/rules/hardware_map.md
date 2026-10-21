@@ -4,7 +4,9 @@ This document is the ground truth for hardware pinouts and peripheral configurat
 `src/config/pins.h` must match this file. If they disagree, this file wins — fix `pins.h`.
 
 Wiring diagram: [`docs/wiring.jpg`](../../docs/wiring.jpg)
-(Note: the diagram's ESP32-side labels "Data line" / "Clock line" are swapped — G21 is SDA, G22 is SCL. The wires themselves are correct.)
+Known diagram errors (the wires themselves are correct):
+- ESP32-side labels "Data line" / "Clock line" are swapped — G21 is SDA, G22 is SCL.
+- The BMI270's two green "SDO" labels are wrong — the real module's pins 5 and 6 are INT and GND (the module image on the shop page differs from the actual board).
 
 Legend: **[TO VERIFY]** = wired but not yet confirmed on hardware. **[TO DECIDE]** = design choice still open. **[NOT WIRED]** = planned, no physical connection yet.
 
@@ -28,7 +30,8 @@ Legend: **[TO VERIFY]** = wired but not yet confirmed on hardware. **[TO DECIDE]
 ## Motors / ESCs
 - **ESC**: JHEMCU EM40A, 4-in-1, 40 A, BLHeli_S, 2–6S, 20×20 mm
 - **Protocol**: **[TO DECIDE]** — supported: PWM, Oneshot125, Multishot, DShot150/300/600 (DShot on ESP32 via the RMT peripheral)
-- **Motors**: iFlight XING-E Pro 2207, KV **[TO DECIDE]** (1800 KV is meant for 6S; 2450/2750 KV for 4S)
+- **Motors**: iFlight XING-E Pro 2207, 2450 KV (4S-rated; matches the 4S battery)
+- **Propellers**: **[TO DECIDE]** — 2207 2450 KV on 4S is the standard 5" setup (e.g. 5x4.3x3 tri-blade)
 - **Layout**: Betaflight convention (Quad X, viewed from above, front at top)
 
 | Motor | Position    | ESC pad | ESP32 GPIO | Spin direction |
@@ -46,10 +49,11 @@ Legend: **[TO VERIFY]** = wired but not yet confirmed on hardware. **[TO DECIDE]
 - **Bus**: I2C, 400 kHz
 - **I2C SDA**: G21
 - **I2C SCL**: G22
-- **Power**: 3V3, GND
-- **I2C Address**: **[TO VERIFY]** — expected 0x68 (SDO tied to GND; code uses `BMI2_I2C_PRIM_ADDR`). The diagram marks two pins as "SDO"; confirm which pin on the real board is SDO and which is CS. 0x69 if SDO is high.
+- **Module pinout** (actual board, in header order): 3.3V, GND, SCL, SDA, INT, GND
+- **Power**: 3.3V ← 3V3, both GND pins ← GND
+- **I2C Address**: 0x68 (confirmed 2026-10-21 by I2C scan; CHIP_ID reads 0x24). SDO is not exposed on the header, so the address is fixed by the module's onboard resistors. Code uses `BMI2_I2C_PRIM_ADDR`.
 - **Mounting alignment**: `Align::CW0` (default, sensor axes = body axes) **[TO VERIFY]** — set in `src/config/SensorConfig.h` after mounting (see End-of-Build Checklist).
-- **INT pin**: not connected (planned: data-ready interrupt to drive the flight loop)
+- **INT pin**: not connected yet. ESP32 GPIO **[TO DECIDE]** (planned: data-ready interrupt to drive the flight loop on core 1)
 
 ## Barometer
 - **Sensor**: DPS310 breakout (pressure + temperature)

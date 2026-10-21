@@ -22,6 +22,7 @@
  */
 #include <SparkFun_BMI270_Arduino_Library.h>
 #include <Wire.h>
+#include "config/SensorConfig.h"
 
 class Bmi270Module : public Module {
 private:
@@ -53,6 +54,11 @@ public:
         
         Serial.println("BMI270 initialized successfully.");
 
+        // SAFETY: an unverified mounting alignment can flip the drone at takeoff.
+        if (!IMU_ALIGNMENT_VERIFIED) {
+            Serial.println("WARNING: IMU alignment NOT verified (SensorConfig.h) - arming will be blocked.");
+        }
+
         // Configure ODR and Power modes for low latency / continuous data
         _imu.setAccelODR(BMI2_ACC_ODR_400HZ);
         _imu.setGyroODR(BMI2_GYR_ODR_400HZ);
@@ -72,15 +78,16 @@ public:
 
             // Read sensor data
             if (_imu.getSensorData() == BMI2_OK) {
-                ImuData data;
-                data.ax = _imu.data.accelX;
-                data.ay = _imu.data.accelY;
-                data.az = _imu.data.accelZ;
-                data.gx = _imu.data.gyroX;
-                data.gy = _imu.data.gyroY;
-                data.gz = _imu.data.gyroZ;
-                
-                // Publish IMU_RAW event
+                // Rotate sensor axes into the body frame (FLU) so every
+                // downstream module is independent of how the chip is mounted.
+                float acc[3] = {_imu.data.accelX, _imu.data.accelY, _imu.data.accelZ};
+                float gyro[3] = {_imu.data.gyroX, _imu.data.gyroY, _imu.data.gyroZ};
+                applyAlignment(IMU_ALIGNMENT, acc, acc);
+                applyAlignment(IMU_ALIGNMENT, gyro, gyro);
+
+                ImuData data{acc[0], acc[1], acc[2], gyro[0], gyro[1], gyro[2]};
+
+                // Publish IMU_RAW event (body frame)
                 publish(EventType::IMU_RAW, &data);
             }
         }

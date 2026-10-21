@@ -26,7 +26,17 @@
 
 class Bmi270Module : public Module {
 private:
-    BMI270 _imu;
+    // SparkFun's BMI270() constructor leaves its internal bmi2_dev struct uninitialized,
+    // and bmi270_init() only sets config_file_ptr when it is null. A stack or heap
+    // instance therefore uploads garbage config (init fails) or crashes.
+    // Function-local statics are zero-initialized, so the driver lives here.
+    // Consequence: one BMI270 per firmware (all modules share this instance).
+    static BMI270& driver() {
+        static BMI270 imu;
+        return imu;
+    }
+
+    BMI270& _imu;
     unsigned long _lastReadTimeUs = 0;
     unsigned long _readIntervalUs = 2500; // 400 Hz default read rate
 
@@ -36,7 +46,7 @@ private:
 
 public:
     explicit Bmi270Module(uint8_t i2cAddress = BMI2_I2C_PRIM_ADDR, TwoWire& wire = Wire, unsigned long readIntervalUs = 2500)
-        : Module("BMI270_IMU"), _i2cAddress(i2cAddress), _wire(wire), _readIntervalUs(readIntervalUs) {}
+        : Module("BMI270_IMU"), _imu(driver()), _readIntervalUs(readIntervalUs), _i2cAddress(i2cAddress), _wire(wire) {}
 
     void setup() override {
         // Initialize I2C if not already initialized

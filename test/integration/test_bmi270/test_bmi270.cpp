@@ -33,30 +33,24 @@ void test_bmi270_initialization_and_publish() {
     // Subscribe to IMU_RAW events
     EventService::instance().subscribe(EventType::IMU_RAW, onImuData, nullptr);
 
-    // If the sensor is connected, the module should be enabled
-    if (imu.isEnabled()) {
-        Serial.println("BMI270 is connected. Testing data read...");
-        
-        // Run loop a few times to allow time for polling
-        unsigned long start = millis();
-        while (millis() - start < 100) { // Run for 100ms
-            testApp.loop();
-            delay(1);
-        }
+    // This is a hardware test: the sensor must be present. A failed init is a
+    // real failure, not a skip (a skip previously hid an uninitialized-driver bug).
+    TEST_ASSERT_TRUE_MESSAGE(imu.isEnabled(), "BMI270 init failed: module disabled itself in setup()");
 
-        // We should have received at least one event
-        TEST_ASSERT_TRUE_MESSAGE(eventReceived, "Expected to receive IMU_RAW event, but did not.");
-        
-        // Print the data to see what it looks like
-        Serial.printf("Acc: %.2f %.2f %.2f, Gyro: %.2f %.2f %.2f\n", 
-            lastData.ax, lastData.ay, lastData.az,
-            lastData.gx, lastData.gy, lastData.gz);
-
-    } else {
-        // If not connected, we should skip the test gracefully rather than failing
-        Serial.println("BMI270 is NOT connected. Skipping data test.");
-        TEST_IGNORE_MESSAGE("BMI270 not connected, skipped data read test.");
+    // Run loop a few times to allow time for polling
+    unsigned long start = millis();
+    while (millis() - start < 100) { // Run for 100ms
+        testApp.loop();
+        delay(1);
     }
+
+    // We should have received at least one event
+    TEST_ASSERT_TRUE_MESSAGE(eventReceived, "Expected to receive IMU_RAW event, but did not.");
+
+    // Print the data to see what it looks like
+    Serial.printf("Acc: %.2f %.2f %.2f, Gyro: %.2f %.2f %.2f\n",
+        lastData.ax, lastData.ay, lastData.az,
+        lastData.gx, lastData.gy, lastData.gz);
 }
 
 void setup() {

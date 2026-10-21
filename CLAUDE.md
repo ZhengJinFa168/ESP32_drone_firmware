@@ -14,4 +14,5 @@ At the start of a session, read `NOTES.md` for the current project state. At the
 PlatformIO is not on PATH; use `~/.platformio/penv/bin/pio`.
 - Unit tests (native): `~/.platformio/penv/bin/pio test -e native`
 - Firmware build: `~/.platformio/penv/bin/pio run -e nodemcu-32s`
-- Integration tests (needs the board connected): `~/.platformio/penv/bin/pio test -e integration`
+- Hardware tests (needs the board connected): `~/.platformio/penv/bin/pio test -e nodemcu-32s`
+- `default_envs = nodemcu-32s`, so plain `pio run` / `pio test` (and the VS Code buttons) target the firmware env

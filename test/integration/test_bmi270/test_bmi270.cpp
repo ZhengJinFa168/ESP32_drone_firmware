@@ -35,7 +35,7 @@ void test_bmi270_initialization_and_publish() {
 
     // This is a hardware test: the sensor must be present. A failed init is a
     // real failure, not a skip (a skip previously hid an uninitialized-driver bug).
-    TEST_ASSERT_TRUE_MESSAGE(imu.isEnabled(), "BMI270 init failed: module disabled itself in setup()");
+    TEST_ASSERT_TRUE_MESSAGE(imu.isHealthy(), "BMI270 unhealthy after setup (init failed or sensor fault)");
 
     // Run loop a few times to allow time for polling
     unsigned long start = millis();

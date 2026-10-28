@@ -56,8 +56,24 @@ struct ModeChangeData {
     uint8_t newMode;   // Maps to flight mode enum
 };
 
+enum class SensorId : uint8_t {
+    IMU,
+    BAROMETER,
+};
+
+enum class SensorFaultReason : uint8_t {
+    NONE,            // Healthy
+    INIT_FAILED,     // Sensor did not initialize (wrong chip ID, no response)
+    ZERO_DATA,       // All axes exactly zero for several samples (sensor reset)
+    FROZEN_DATA,     // Identical samples for too long (data stopped updating)
+    READ_ERRORS,     // Consecutive bus read failures
+    RESET_DETECTED,  // Sensor registers show it lost its configuration
+};
+
 struct SensorFaultData {
-    bool fault;   // true = sensor unhealthy, its data must not be trusted
+    SensorId sensor;
+    bool fault;                // true = sensor unhealthy, its data must not be trusted
+    SensorFaultReason reason;  // Why it is unhealthy (NONE when fault == false)
 };
 
 // Arming blockers: bit flags. Arming is allowed only when no bit is set.
@@ -68,7 +84,7 @@ namespace ArmingBlocker {
     constexpr uint16_t ARM_SWITCH_NOT_RESET   = 1 << 3;  // Arm switch not seen OFF since boot / last disarm / blocked attempt
     constexpr uint16_t NOT_LEVEL              = 1 << 4;  // Roll or pitch beyond the arming limit
     constexpr uint16_t ATTITUDE_STALE         = 1 << 5;  // No recent attitude estimate
-    constexpr uint16_t SENSOR_FAULT           = 1 << 6;  // A sensor reported a fault
+    constexpr uint16_t SENSOR_FAULT           = 1 << 6;  // At least one sensor reports a fault
 }
 
 enum class DisarmReason : uint8_t {

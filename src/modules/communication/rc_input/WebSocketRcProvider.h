@@ -4,6 +4,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include "core/eventService/EventType.h"
+#include "config/ArmingConfig.h"
 #include "WebUI.h"
 
 class WebSocketRcProvider {
@@ -23,10 +24,13 @@ private:
                 data[len] = 0; // Null-terminate
                 char* msg = (char*)data;
                 
-                // Parse "T:0.00,Y:0.00,P:0.00,R:0.00"
-                RcInputData parsed = {0.0f, 0.0f, 0.0f, 0.0f, {0, 0, 0, 0}};
-                if (sscanf(msg, "T:%f,Y:%f,P:%f,R:%f",
-                           &parsed.throttle, &parsed.yaw, &parsed.pitch, &parsed.roll) == 4) {
+                // Parse "T:0.00,Y:0.00,P:0.00,R:0.00,A:0" (A = arm switch, 0/1)
+                RcInputData parsed = {0.0f, 0.0f, 0.0f, 0.0f, {0, 0, 0, 0}, false};
+                int armSwitch = 0;
+                if (sscanf(msg, "T:%f,Y:%f,P:%f,R:%f,A:%d",
+                           &parsed.throttle, &parsed.yaw, &parsed.pitch, &parsed.roll, &armSwitch) == 5) {
+                    parsed.aux[ARM_AUX_CHANNEL] = armSwitch ? 1 : 0;
+                    parsed.linkOk = true;
                     xQueueOverwrite(_rcQueue, &parsed); // Replaces any unread packet, never blocks
                 }
             }

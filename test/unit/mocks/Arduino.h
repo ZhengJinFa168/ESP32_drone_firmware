@@ -10,7 +10,9 @@
 #define INPUT 0
 #define LED_BUILTIN 2
 
-inline unsigned long millis() { return 0; }
+// Controllable clock for tests: set g_mockMillis to simulate time
+inline unsigned long g_mockMillis = 0;
+inline unsigned long millis() { return g_mockMillis; }
 inline unsigned long micros() { return 0; }
 inline void delay(unsigned long) {}
 inline void pinMode(int, int) {}

@@ -14,16 +14,25 @@
   - Code uses `Serial.print` instead of standard logging (`log_e`/`log_i`), against conventions.
   - `platformio.ini` uses `^` version ranges; conventions require exact pinned versions.
   - `App::loop()` uses `delay(1)` (forbidden by conventions); plan is an IMU-interrupt-driven flight task pinned to core 1.
-  - `Bmi270Module` polls in `loop()` instead of using the INT pin; ignores `PIN_SDA`/`PIN_SCL`; error message doesn't include the library error code.
+  - `Bmi270Module` polls in `loop()` instead of using the INT pin.
   - `EscModule` is a stub and has no constructor passing a name to `Module`.
   - Complementary filter uses a fixed `alpha` independent of `dt`; no gyro bias calibration.
   - `send_P` deprecation warning in `WebSocketRcProvider.h`.
-  - BMI270 can get stuck (CHIP_ID reads 0x20 instead of 0x24, init returns -3) and an ESP32 reset does not clear it, only a power cycle does. Consider I2C bus recovery + retry at boot.
+  - BMI270 can get stuck (CHIP_ID reads 0x20 instead of 0x24, init returns -3) and an ESP32 reset does not clear it, only a power cycle does. Bus recovery + retry now implemented (untested on hardware); if it can't clear the stuck state, the sensor's power must be switchable.
   - `Module.h` includes `Arduino.h` (every module touches Arduino); fix with the Stage 2 platform layer.
   - `ComplementaryFilter.h` redefines `RAD_TO_DEG`/`DEG_TO_RAD` (clashes with Arduino.h); `test_basic` is an empty test file.
 
 ## Session Log
 *Newest first. Prepend each new session entry directly below this line.*
+
+### [2026-10-28] - IMU Sensor Health Monitoring
+- Built without the board. 3-phase workflow; decisions: faults auto-clear after 1 s of healthy data (arming already disarmed and needs a switch re-toggle); thresholds below are engineering estimates, to be checked with the wiggle test.
+- **`ImuHealthMonitor`** (`src/modules/sensors/bmi_imu/ImuHealthMonitor.h`, pure): fault after 5 all-zero samples (sensor reset), 20 identical samples (frozen), 10 consecutive read errors, an init failure or a detected register reset. Single glitches are tolerated (zero sample after init, duplicate reads from clock drift, isolated bus errors). Clears after 400 good samples; recovery attempts rate-limited to 1/s and skipped while good data arrives. Thresholds in `SensorConfig.h`.
+- **`Bmi270Module`**: feeds every read to the monitor, publishes `SENSOR_FAULT` on changes, never publishes data while faulty or all-zero samples, checks the power-control register (0x7D) every 100 ms, and on fault runs I2C bus recovery (9 SCL clocks + STOP) and re-init (blocks the loop a few hundred ms; the drone is already disarmed). Init failure no longer disables the module: it reports `INIT_FAILED` and retries. Uses `PIN_SDA`/`PIN_SCL` from `pins.h` now.
+- **Per-sensor faults**: `SensorFaultData` = {`SensorId`, fault, `SensorFaultReason`}; `ArmingLogic::onSensorFault(SensorId, bool)` keeps one bit per sensor, so a healthy barometer can never clear an IMU fault (bug found in review before it existed).
+- `test_bmi270` now asserts `isHealthy()` (module stays enabled on init failure).
+- **Tests**: new `test_imu_health` (15 cases), arming +1. Native 73/73; firmware and the hardware test build.
+- **Not yet tested on hardware**: register check, bus recovery, re-init, and the whole fault/clear cycle with the wiggle test.
 
 ### [2026-10-28] - Arming State Machine
 - Built without the board (pure logic + native tests). Followed the 3-phase workflow.

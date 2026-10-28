@@ -33,7 +33,8 @@ private:
     static void onSensorFault(void* ctx, const void* data) {
         if (!data) return;
         auto* self = static_cast<ArmingModule*>(ctx);
-        self->_logic.onSensorFault(static_cast<const SensorFaultData*>(data)->fault);
+        const auto* fault = static_cast<const SensorFaultData*>(data);
+        self->_logic.onSensorFault(fault->sensor, fault->fault);
         self->step();
     }
 

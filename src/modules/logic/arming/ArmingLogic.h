@@ -39,7 +39,11 @@ public:
         _lastAttitudeMs = nowMs;
     }
 
-    void onSensorFault(bool fault) { _sensorFault = fault; }
+    // Faults are tracked per sensor: one sensor reporting OK never clears another's fault
+    void onSensorFault(SensorId sensor, bool fault) {
+        const uint8_t bit = static_cast<uint8_t>(1u << static_cast<uint8_t>(sensor));
+        _sensorFaults = fault ? (_sensorFaults | bit) : (_sensorFaults & ~bit);
+    }
 
     Transition update(uint32_t nowMs) {
         const bool rcGoodNow = _haveRc && _rc.linkOk && (nowMs - _lastRcMs) <= RC_LINK_TIMEOUT_MS;
@@ -118,7 +122,7 @@ private:
         } else if (std::fabs(_attitude.roll) > ARM_MAX_TILT_DEG || std::fabs(_attitude.pitch) > ARM_MAX_TILT_DEG) {
             b |= ArmingBlocker::NOT_LEVEL;
         }
-        if (_sensorFault) b |= ArmingBlocker::SENSOR_FAULT;
+        if (_sensorFaults != 0) b |= ArmingBlocker::SENSOR_FAULT;
         return b;
     }
 
@@ -147,7 +151,7 @@ private:
         }
 
         // SAFETY: checked in order of severity
-        if (_sensorFault) return disarm(DisarmReason::SENSOR_FAULT);
+        if (_sensorFaults != 0) return disarm(DisarmReason::SENSOR_FAULT);
         if (!attitudeFresh) return disarm(DisarmReason::ATTITUDE_STALE);
         if (_overTilt && nowMs - _overTiltSinceMs >= CRASH_TIME_MS) return disarm(DisarmReason::CRASH);
         if (rcGoodNow && !_switchOn) return disarm(DisarmReason::SWITCH_OFF);
@@ -186,7 +190,7 @@ private:
     AttitudeData _attitude{};
     bool _haveAttitude = false;
     uint32_t _lastAttitudeMs = 0;
-    bool _sensorFault = false;
+    uint8_t _sensorFaults = 0;  // One bit per SensorId
     bool _overTilt = false;
     uint32_t _overTiltSinceMs = 0;
 

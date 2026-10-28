@@ -38,7 +38,7 @@ When passing data, use the existing structs in `EventType.h`:
 - `AttitudeData` (roll, pitch, yaw)
 - `RcInputData` (throttle, roll, pitch, yaw, aux[], linkOk — false on RC failsafe packets)
 - `MotorCommandData` (motors[4])
-- `SensorFaultData` (fault) on `SENSOR_FAULT`
+- `SensorFaultData` (sensor, fault, reason) on `SENSOR_FAULT` — published by sensor drivers on every health change; arming tracks faults per sensor
 - `ArmingStatusData` (armed, blockers, lastDisarmReason, rcLinkOk) on `ARMED`, `DISARMED`, `ARMING_STATUS`
 - System Events: `MODE_CHANGED`, `HEARTBEAT`
 

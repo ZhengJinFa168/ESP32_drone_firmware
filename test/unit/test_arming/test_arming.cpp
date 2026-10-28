@@ -130,7 +130,7 @@ void test_stale_attitude_blocks() {
 
 void test_sensor_fault_blocks() {
     Sim s;
-    s.logic.onSensorFault(true);
+    s.logic.onSensorFault(SensorId::IMU, true);
     s.arm();
     TEST_ASSERT_FALSE(s.logic.isArmed());
     TEST_ASSERT_TRUE(s.has(ArmingBlocker::SENSOR_FAULT));
@@ -173,10 +173,10 @@ void test_switch_off_disarms() {
 void test_rearm_requires_switch_off_after_fault_disarm() {
     Sim s;
     s.arm();
-    s.logic.onSensorFault(true);
+    s.logic.onSensorFault(SensorId::IMU, true);
     s.run(10);
     TEST_ASSERT_FALSE(s.logic.isArmed());
-    s.logic.onSensorFault(false);  // Fault clears, switch still ON
+    s.logic.onSensorFault(SensorId::IMU, false);  // Fault clears, switch still ON
     s.run(100);
     TEST_ASSERT_FALSE(s.logic.isArmed());
     s.armSwitch(false);
@@ -186,10 +186,22 @@ void test_rearm_requires_switch_off_after_fault_disarm() {
     TEST_ASSERT_TRUE(s.logic.isArmed());
 }
 
+void test_other_sensor_ok_does_not_clear_fault() {
+    Sim s;
+    s.logic.onSensorFault(SensorId::IMU, true);
+    s.logic.onSensorFault(SensorId::BAROMETER, false);  // Barometer healthy must not clear the IMU fault
+    s.arm();
+    TEST_ASSERT_FALSE(s.logic.isArmed());
+    TEST_ASSERT_TRUE(s.has(ArmingBlocker::SENSOR_FAULT));
+    s.logic.onSensorFault(SensorId::IMU, false);
+    s.run(10);
+    TEST_ASSERT_FALSE(s.has(ArmingBlocker::SENSOR_FAULT));
+}
+
 void test_sensor_fault_disarms_immediately() {
     Sim s;
     s.arm();
-    s.logic.onSensorFault(true);
+    s.logic.onSensorFault(SensorId::IMU, true);
     s.run(10);
     TEST_ASSERT_FALSE(s.logic.isArmed());
     TEST_ASSERT_EQUAL(static_cast<int>(DisarmReason::SENSOR_FAULT), static_cast<int>(s.logic.lastDisarmReason()));
@@ -374,7 +386,7 @@ void test_module_publishes_events() {
     TEST_ASSERT_EQUAL(1, counts.disarmed);
     TEST_ASSERT_EQUAL(static_cast<int>(DisarmReason::SWITCH_OFF), static_cast<int>(counts.last.lastDisarmReason));
 
-    SensorFaultData fault{true};
+    SensorFaultData fault{SensorId::IMU, true, SensorFaultReason::ZERO_DATA};
     EventService::instance().publish(EventType::SENSOR_FAULT, &fault);
     TEST_ASSERT_TRUE((counts.last.blockers & ArmingBlocker::SENSOR_FAULT) != 0);
 }
@@ -416,6 +428,7 @@ int main() {
 
     RUN_TEST(test_switch_off_disarms);
     RUN_TEST(test_rearm_requires_switch_off_after_fault_disarm);
+    RUN_TEST(test_other_sensor_ok_does_not_clear_fault);
     RUN_TEST(test_sensor_fault_disarms_immediately);
     RUN_TEST(test_stale_attitude_disarms);
     RUN_TEST(test_crash_disarms_only_when_sustained);

@@ -36,9 +36,16 @@ Goal: the microcontroller can be swapped (e.g. ESP32 → ESP32-S3, STM32, RP2040
 When passing data, use the existing structs in `EventType.h`:
 - `ImuData` (ax, ay, az, gx, gy, gz)
 - `AttitudeData` (roll, pitch, yaw)
-- `RcInputData` (throttle, roll, pitch, yaw, aux[])
+- `RcInputData` (throttle, roll, pitch, yaw, aux[], linkOk — false on RC failsafe packets)
 - `MotorCommandData` (motors[4])
-- System Events: `ARMED`, `DISARMED`, `MODE_CHANGED`, `HEARTBEAT`
+- `SensorFaultData` (fault) on `SENSOR_FAULT`
+- `ArmingStatusData` (armed, blockers, lastDisarmReason, rcLinkOk) on `ARMED`, `DISARMED`, `ARMING_STATUS`
+- System Events: `MODE_CHANGED`, `HEARTBEAT`
+
+## Arming & Safety
+- Arming is decided only by `ArmingLogic` (`src/modules/logic/arming/`), thresholds in `src/config/ArmingConfig.h`. Motors may run only while `ARMED`; any motor output must default to zero and stay zero unless it has seen `ARMED`.
+- RC link loss does not disarm: the drone stays armed so flight logic can hold (`RC_LOSS_HOLD_MS`) and then descend; arming disarms after `RC_LOSS_MAX_ARMED_MS`.
+- Arming and every module that consumes its events must run in the same task (the event bus is synchronous and single-threaded).
 
 ## Expected AI Agent Behavior
 When modifying or creating new features, the agent MUST:

@@ -15,10 +15,16 @@ const char WEB_UI_HTML[] PROGMEM = R"=====(
         .stick { width: 60px; height: 60px; background: rgba(255,255,255,0.5); border-radius: 50%; position: absolute; top: 45px; left: 45px; pointer-events: none; }
         .status { position: absolute; top: 10px; width: 100%; text-align: center; font-size: 14px; pointer-events: none; z-index: 10; }
         #status-text { color: red; }
+        #arm-btn { position: absolute; top: 40px; left: 50%; transform: translateX(-50%); z-index: 20;
+                   padding: 10px 24px; font-size: 16px; font-weight: bold; border: 2px solid #888;
+                   border-radius: 8px; background: #444; color: white; }
+        #arm-btn.on { background: #b00; border-color: #f44; }
     </style>
 </head>
 <body>
     <div class="status">WebSocket: <span id="status-text">Disconnected</span></div>
+    <!-- Arm switch: the firmware decides whether arming is allowed -->
+    <button id="arm-btn">ARM SWITCH: OFF</button>
     <div class="container">
         <!-- Left Stick: Throttle (Y) and Yaw (X) -->
         <div class="half" id="left-zone">
@@ -37,19 +43,29 @@ const char WEB_UI_HTML[] PROGMEM = R"=====(
         let ws;
         const statusEl = document.getElementById('status-text');
         
-        let rc = { throttle: 0.0, yaw: 0.0, pitch: 0.0, roll: 0.0 };
+        let rc = { throttle: 0.0, yaw: 0.0, pitch: 0.0, roll: 0.0, arm: 0 };
+        const armBtn = document.getElementById('arm-btn');
+
+        function setArm(on) {
+            rc.arm = on ? 1 : 0;
+            armBtn.innerText = on ? 'ARM SWITCH: ON' : 'ARM SWITCH: OFF';
+            armBtn.classList.toggle('on', on);
+        }
+        armBtn.addEventListener('touchstart', (e) => { e.preventDefault(); e.stopPropagation(); setArm(!rc.arm); }, {passive: false});
+        armBtn.addEventListener('click', () => setArm(!rc.arm));
         
         function connect() {
             ws = new WebSocket('ws://' + window.location.host + '/ws');
             ws.onopen = () => { statusEl.innerText = 'Connected'; statusEl.style.color = 'lime'; };
-            ws.onclose = () => { statusEl.innerText = 'Disconnected'; statusEl.style.color = 'red'; setTimeout(connect, 1000); };
+            // SAFETY: switch back to OFF on disconnect, so a reconnect never sends ARM ON by itself
+            ws.onclose = () => { setArm(false); statusEl.innerText = 'Disconnected'; statusEl.style.color = 'red'; setTimeout(connect, 1000); };
         }
         connect();
         
         // 50Hz send loop
         setInterval(() => {
             if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(`T:${rc.throttle.toFixed(2)},Y:${rc.yaw.toFixed(2)},P:${rc.pitch.toFixed(2)},R:${rc.roll.toFixed(2)}`);
+                ws.send(`T:${rc.throttle.toFixed(2)},Y:${rc.yaw.toFixed(2)},P:${rc.pitch.toFixed(2)},R:${rc.roll.toFixed(2)},A:${rc.arm}`);
             }
         }, 20);
 

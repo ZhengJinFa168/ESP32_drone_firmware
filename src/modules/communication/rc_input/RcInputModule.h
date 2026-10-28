@@ -50,8 +50,9 @@ public:
                 _inFailsafe = true;
                 Serial.println("RC SIGNAL LOST! Failsafe triggered.");
                 
-                // Publish failsafe state: zero throttle, neutral sticks
-                RcInputData failsafeData = {0.0f, 0.0f, 0.0f, 0.0f, {0, 0, 0, 0}};
+                // Publish failsafe state: zero throttle, neutral sticks, linkOk = false so
+                // consumers (arming, flight logic) can tell it apart from real pilot input
+                RcInputData failsafeData = {0.0f, 0.0f, 0.0f, 0.0f, {0, 0, 0, 0}, false};
                 publish(EventType::RC_INPUT, &failsafeData);
             }
         }

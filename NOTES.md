@@ -18,12 +18,24 @@
   - `EscModule` is a stub and has no constructor passing a name to `Module`.
   - Complementary filter uses a fixed `alpha` independent of `dt`; no gyro bias calibration.
   - `send_P` deprecation warning in `WebSocketRcProvider.h`.
-  - Arming state machine (stage 3) must refuse to arm while `IMU_ALIGNMENT_VERIFIED == false`.
   - BMI270 can get stuck (CHIP_ID reads 0x20 instead of 0x24, init returns -3) and an ESP32 reset does not clear it, only a power cycle does. Consider I2C bus recovery + retry at boot.
+  - `Module.h` includes `Arduino.h` (every module touches Arduino); fix with the Stage 2 platform layer.
   - `ComplementaryFilter.h` redefines `RAD_TO_DEG`/`DEG_TO_RAD` (clashes with Arduino.h); `test_basic` is an empty test file.
 
 ## Session Log
 *Newest first. Prepend each new session entry directly below this line.*
+
+### [2026-10-28] - Arming State Machine
+- Built without the board (pure logic + native tests). Followed the 3-phase workflow.
+- **Design decisions**: two states (DISARMED / ARMED), no separate failsafe state. Arming allowed only when no blocker is set and the arm switch goes OFF→ON. RC loss does **not** disarm: the drone stays armed, flight logic will hold ~3 s then descend (Stage 4, needs DPS310 altitude hold, moved from Stage 6 to Stage 4); arming disarms after 20 s (touchdown detection will disarm earlier, Stage 4). Horizontal drift during the hold is accepted.
+- **Blockers**: ALIGNMENT_NOT_VERIFIED, NO_RC_LINK (link must be stable 1 s), THROTTLE_NOT_LOW (>5%), ARM_SWITCH_NOT_RESET (switch must be seen OFF after boot, every disarm and every blocked attempt), NOT_LEVEL (>25°), ATTITUDE_STALE (>50 ms), SENSOR_FAULT.
+- **Immediate disarm**: switch OFF, sensor fault, stale attitude, crash (>80° for 200 ms), auto-disarm (throttle never raised within 5 s of arming).
+- **Files**: `config/ArmingConfig.h`, `modules/logic/arming/ArmingLogic.h` (pure, no Arduino), `ArmingModule.h` (event wrapper, registered in `main.cpp`). `EventType.h`: `SENSOR_FAULT`, `ARMING_STATUS`, `ArmingBlocker` flags, `DisarmReason`, `ArmingStatusData`, `RcInputData::linkOk`.
+- **RC**: failsafe packets now carry `linkOk = false` (previously indistinguishable from pilot idle). WebSocket packet format is now `T:..,Y:..,P:..,R:..,A:0|1`; the web UI has an ARM SWITCH toggle that resets to OFF on disconnect.
+- **Tests**: `test_arming` (25 cases incl. RC loss/recovery, crash, auto-disarm, clock wrap-around, module events). Mock `millis()` is now controllable (`g_mockMillis`). Native 57/57; firmware builds.
+- **Not yet tested on hardware**: web UI ARM button and the RC path (no board this session).
+- Note: with `IMU_ALIGNMENT_VERIFIED = false` the real firmware never arms (by design). Stage 3 bench tests will need the gravity test done for the bench orientation first.
+- `Module.h` includes `Arduino.h`, so every module still pulls in Arduino; `ArmingLogic` avoids it. Full fix belongs to the Stage 2 platform layer.
 
 ### [2026-10-21] - BMI270 Bring-up and Uninitialized-Driver Fix
 - **Hardware notes**: motors are 2450 KV (4S); propeller size still open. Real BMI270 module pinout is 3.3V, GND, SCL, SDA, INT, GND (differs from the shop image; the diagram's green "SDO" labels are wrong). Wiring advice given: INT → G32 suggested, not yet recorded in `pins.h`.

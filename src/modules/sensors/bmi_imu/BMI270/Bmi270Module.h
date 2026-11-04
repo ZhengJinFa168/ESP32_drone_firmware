@@ -30,6 +30,13 @@
  *   IMU_RECOVERY_RETRY_MS. Re-init uploads 8 KB of config and blocks the loop for a
  *   few hundred ms; acceptable because a fault has already disarmed the drone.
  * NOTE: register check, bus recovery and re-init are not yet tested on hardware.
+ *
+ * Gyro calibration (see GyroCalibrator):
+ * - At boot, healthy body-frame samples go to the calibrator until it has averaged
+ *   GYRO_CAL_SAMPLES still samples; then GYRO_CALIBRATION is published once.
+ * - SAFETY: no IMU_RAW is published before that, so the estimator never integrates
+ *   an uncorrected gyro. Afterwards the bias is subtracted from every sample.
+ * - A sensor fault during calibration restarts it. The bias is kept across re-init.
  */
 #include <SparkFun_BMI270_Arduino_Library.h>
 #include <Wire.h>
@@ -37,6 +44,7 @@
 #include "config/SensorConfig.h"
 #include "config/pins.h"
 #include "modules/sensors/bmi_imu/ImuHealthMonitor.h"
+#include "modules/sensors/bmi_imu/GyroCalibrator.h"
 
 class Bmi270Module : public Module {
 private:
@@ -65,6 +73,11 @@ private:
     // after this one (e.g. arming) have not subscribed yet during setup().
     ImuHealthMonitor::Change _bootChange = ImuHealthMonitor::Change::NONE;
     bool _bootReported = false;
+
+    // Gyro calibration
+    GyroCalibrator _gyroCal;
+    uint32_t _lastCalLogMs = 0;
+    uint32_t _calRestartsLogged = 0;
     uint32_t _lastRegCheckMs = 0;
 
     static uint32_t nowMs() { return static_cast<uint32_t>(millis()); }
@@ -146,8 +159,34 @@ private:
             LOG_I("BMI270", "SENSOR OK, fault cleared");
         }
 
+        // Samples from before the fault may be bad: never let them into the bias
+        if (change == ImuHealthMonitor::Change::FAULT_RAISED) _gyroCal.restart();
+
         SensorFaultData fault{SensorId::IMU, _health.isFaulty(), _health.reason()};
         publish(EventType::SENSOR_FAULT, &fault);
+    }
+
+    void handleCalibration(GyroCalibrator::Result result, uint32_t now) {
+        using Result = GyroCalibrator::Result;
+        if (result == Result::COMPLETED) {
+            LOG_I("BMI270", "gyro calibrated, bias (deg/s): x %.3f, y %.3f, z %.3f (restarts: %lu)",
+                  _gyroCal.bias(0), _gyroCal.bias(1), _gyroCal.bias(2),
+                  static_cast<unsigned long>(_gyroCal.restarts()));
+            GyroCalibrationData cal{true, _gyroCal.bias(0), _gyroCal.bias(1), _gyroCal.bias(2)};
+            publish(EventType::GYRO_CALIBRATION, &cal);
+            return;
+        }
+        if (result != Result::RESTARTED_MOTION && result != Result::RESTARTED_ACCEL &&
+            result != Result::RESTARTED_BIAS) {
+            return;
+        }
+        // Restarts can happen every sample while the drone is handled: rate-limit the log
+        if (now - _lastCalLogMs < GYRO_CAL_LOG_INTERVAL_MS) return;
+        _lastCalLogMs = now;
+        LOG_W("BMI270", "gyro calibration restarted (%s), %lu restarts since last report: keep the drone still",
+              gyroCalResultName(result),
+              static_cast<unsigned long>(_gyroCal.restarts() - _calRestartsLogged));
+        _calRestartsLogged = _gyroCal.restarts();
     }
 
     void checkPowerRegister(uint32_t now) {
@@ -185,6 +224,7 @@ public:
         if (!IMU_ALIGNMENT_VERIFIED) {
             LOG_W("BMI270", "IMU alignment NOT verified (SensorConfig.h), arming will be blocked");
         }
+        LOG_I("BMI270", "gyro calibration starts with the first healthy samples: keep the drone still");
 
         _lastReadTimeUs = micros();
         _lastRegCheckMs = nowMs();
@@ -227,6 +267,13 @@ public:
         applyAlignment(IMU_ALIGNMENT, acc, acc);
         applyAlignment(IMU_ALIGNMENT, gyro, gyro);
 
+        // SAFETY: nothing is published until the gyro bias is known
+        if (!_gyroCal.isCalibrated()) {
+            handleCalibration(_gyroCal.onSample(acc, gyro), now);
+            return;
+        }
+        _gyroCal.apply(gyro);
+
         ImuData data{acc[0], acc[1], acc[2], gyro[0], gyro[1], gyro[2], static_cast<uint32_t>(nowUs)};
 
         // Publish IMU_RAW event (body frame)
@@ -234,4 +281,5 @@ public:
     }
 
     bool isHealthy() const { return !_health.isFaulty(); }
+    bool isGyroCalibrated() const { return _gyroCal.isCalibrated(); }
 };

@@ -27,5 +27,19 @@ constexpr uint16_t IMU_HEALTH_RECOVERY_SAMPLES = 400;   // Healthy samples befor
 constexpr uint32_t IMU_RECOVERY_RETRY_MS = 1000;        // Minimum time between re-initialization attempts
 constexpr uint32_t IMU_REG_CHECK_MS = 100;              // How often the driver checks the power-control register
 
+// ============================================
+// GYRO CALIBRATION (at boot, drone must be still)
+// ============================================
+// Engineering estimates [TO TUNE on hardware]: log the gyro with the board still
+// (Teleplot) and check the noise spread and the offset against these limits.
+constexpr uint16_t GYRO_CAL_SAMPLES = 400;           // Still samples averaged (1 s at 400 Hz)
+constexpr float GYRO_CAL_MAX_SPREAD_DPS = 2.0f;      // Max - min per axis during the window (else: moving)
+constexpr float GYRO_CAL_ACC_MIN_G = 0.9f;           // Accel magnitude window: outside = being moved/shaken
+constexpr float GYRO_CAL_ACC_MAX_G = 1.1f;
+constexpr float GYRO_CAL_MAX_BIAS_DPS = 5.0f;        // Sanity limit; a healthy BMI270 offset is well below 1 deg/s
+constexpr uint32_t GYRO_CAL_LOG_INTERVAL_MS = 1000;  // Restart warnings at most this often
+
+static_assert(GYRO_CAL_SAMPLES > 0, "GYRO_CAL_SAMPLES must be > 0");
+
 static_assert(isValidRotation(IMU_ALIGNMENT),
               "IMU_ALIGNMENT is not a proper rotation (mirror image or invalid axes)");

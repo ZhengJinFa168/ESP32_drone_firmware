@@ -8,6 +8,7 @@ enum class EventType : uint8_t {
     // Sensor events
     IMU_RAW,            // Accel + gyro, already rotated into the body frame (FLU)
     SENSOR_FAULT,       // A sensor reports it is unhealthy (SensorFaultData)
+    GYRO_CALIBRATION,   // Gyro bias calibration finished (GyroCalibrationData)
 
     // Estimation events
     ATTITUDE_UPDATED,   // Roll, pitch, yaw angles
@@ -77,6 +78,13 @@ struct SensorFaultData {
     SensorFaultReason reason;  // Why it is unhealthy (NONE when fault == false)
 };
 
+// Published once by the IMU driver when the boot calibration completes.
+// Bias is in the body frame and already subtracted from every IMU_RAW sample.
+struct GyroCalibrationData {
+    bool calibrated;
+    float biasX, biasY, biasZ;  // deg/s
+};
+
 // Arming blockers: bit flags. Arming is allowed only when no bit is set.
 namespace ArmingBlocker {
     constexpr uint16_t ALIGNMENT_NOT_VERIFIED = 1 << 0;  // IMU_ALIGNMENT_VERIFIED is false
@@ -86,6 +94,7 @@ namespace ArmingBlocker {
     constexpr uint16_t NOT_LEVEL              = 1 << 4;  // Roll or pitch beyond the arming limit
     constexpr uint16_t ATTITUDE_STALE         = 1 << 5;  // No recent attitude estimate
     constexpr uint16_t SENSOR_FAULT           = 1 << 6;  // At least one sensor reports a fault
+    constexpr uint16_t GYRO_NOT_CALIBRATED    = 1 << 7;  // Boot gyro calibration not finished (keep the drone still)
 }
 
 enum class DisarmReason : uint8_t {

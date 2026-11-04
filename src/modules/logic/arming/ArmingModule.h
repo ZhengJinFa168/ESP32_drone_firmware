@@ -6,7 +6,7 @@
 #include "ArmingLogic.h"
 
 // Connects ArmingLogic to the event bus.
-// Subscribes: RC_INPUT, ATTITUDE_UPDATED, SENSOR_FAULT
+// Subscribes: RC_INPUT, ATTITUDE_UPDATED, SENSOR_FAULT, GYRO_CALIBRATION
 // Publishes:  ARMED, DISARMED (on transitions), ARMING_STATUS (on every status change)
 // All decisions live in ArmingLogic; this wrapper only supplies the clock and events.
 class ArmingModule : public Module {
@@ -36,6 +36,13 @@ private:
         auto* self = static_cast<ArmingModule*>(ctx);
         const auto* fault = static_cast<const SensorFaultData*>(data);
         self->_logic.onSensorFault(fault->sensor, fault->fault);
+        self->step();
+    }
+
+    static void onGyroCalibration(void* ctx, const void* data) {
+        if (!data) return;
+        auto* self = static_cast<ArmingModule*>(ctx);
+        self->_logic.onGyroCalibration(static_cast<const GyroCalibrationData*>(data)->calibrated);
         self->step();
     }
 
@@ -89,6 +96,7 @@ public:
         subscribe(EventType::RC_INPUT, onRcInput);
         subscribe(EventType::ATTITUDE_UPDATED, onAttitude);
         subscribe(EventType::SENSOR_FAULT, onSensorFault);
+        subscribe(EventType::GYRO_CALIBRATION, onGyroCalibration);
         // No publishing here: modules set up later have not subscribed yet.
         // The initial (disarmed) status goes out on the first loop() or event.
     }

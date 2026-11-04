@@ -37,14 +37,15 @@ void test_bmi270_initialization_and_publish() {
     // real failure, not a skip (a skip previously hid an uninitialized-driver bug).
     TEST_ASSERT_TRUE_MESSAGE(imu.isHealthy(), "BMI270 unhealthy after setup (init failed or sensor fault)");
 
-    // Run loop a few times to allow time for polling
+    // The board must lie still: gyro calibration (~1 s) runs before any IMU_RAW is
+    // published. Allow 3 s for calibration (a restart or two) plus some samples.
     unsigned long start = millis();
-    while (millis() - start < 100) { // Run for 100ms
+    while (millis() - start < 3000 && !(imu.isGyroCalibrated() && eventReceived)) {
         testApp.loop();
         delay(1);
     }
 
-    // We should have received at least one event
+    TEST_ASSERT_TRUE_MESSAGE(imu.isGyroCalibrated(), "Gyro calibration did not finish in 3 s (board moving?)");
     TEST_ASSERT_TRUE_MESSAGE(eventReceived, "Expected to receive IMU_RAW event, but did not.");
 
     // Print the data to see what it looks like

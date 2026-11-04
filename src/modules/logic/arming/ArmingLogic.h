@@ -45,6 +45,9 @@ public:
         _sensorFaults = fault ? (_sensorFaults | bit) : (_sensorFaults & ~bit);
     }
 
+    // Starts false: arming stays blocked until the IMU driver reports a finished calibration
+    void onGyroCalibration(bool calibrated) { _gyroCalibrated = calibrated; }
+
     Transition update(uint32_t nowMs) {
         const bool rcGoodNow = _haveRc && _rc.linkOk && (nowMs - _lastRcMs) <= RC_LINK_TIMEOUT_MS;
         updateLinkState(rcGoodNow, nowMs);
@@ -123,6 +126,7 @@ private:
             b |= ArmingBlocker::NOT_LEVEL;
         }
         if (_sensorFaults != 0) b |= ArmingBlocker::SENSOR_FAULT;
+        if (!_gyroCalibrated) b |= ArmingBlocker::GYRO_NOT_CALIBRATED;
         return b;
     }
 
@@ -152,6 +156,9 @@ private:
 
         // SAFETY: checked in order of severity
         if (_sensorFaults != 0) return disarm(DisarmReason::SENSOR_FAULT);
+        // Cannot happen today (calibration runs once, before arming is possible and is
+        // never reset); guards against a future change. The gyro bias is unknown.
+        if (!_gyroCalibrated) return disarm(DisarmReason::SENSOR_FAULT);
         if (!attitudeFresh) return disarm(DisarmReason::ATTITUDE_STALE);
         if (_overTilt && nowMs - _overTiltSinceMs >= CRASH_TIME_MS) return disarm(DisarmReason::CRASH);
         if (rcGoodNow && !_switchOn) return disarm(DisarmReason::SWITCH_OFF);
@@ -191,6 +198,7 @@ private:
     bool _haveAttitude = false;
     uint32_t _lastAttitudeMs = 0;
     uint8_t _sensorFaults = 0;  // One bit per SensorId
+    bool _gyroCalibrated = false;
     bool _overTilt = false;
     uint32_t _overTiltSinceMs = 0;
 
@@ -209,6 +217,7 @@ inline const char* armingBlockerName(uint16_t bit) {
         case ArmingBlocker::NOT_LEVEL:              return "NOT_LEVEL";
         case ArmingBlocker::ATTITUDE_STALE:         return "ATTITUDE_STALE";
         case ArmingBlocker::SENSOR_FAULT:           return "SENSOR_FAULT";
+        case ArmingBlocker::GYRO_NOT_CALIBRATED:    return "GYRO_NOT_CALIBRATED";
         default:                                    return "UNKNOWN";
     }
 }

@@ -24,8 +24,11 @@ struct Sim {
     int armedCount = 0;
     int disarmedCount = 0;
 
-    explicit Sim(bool alignmentVerified = true, uint32_t startMs = 0)
-        : logic(alignmentVerified), t(startMs) {}
+    // Gyro calibrated by default; boot tests pass gyroCalibrated = false
+    explicit Sim(bool alignmentVerified = true, uint32_t startMs = 0, bool gyroCalibrated = true)
+        : logic(alignmentVerified), t(startMs) {
+        logic.onGyroCalibration(gyroCalibrated);
+    }
 
     void run(uint32_t ms) {
         for (uint32_t elapsed = 0; elapsed < ms; elapsed += 10) {
@@ -52,6 +55,11 @@ struct Sim {
     bool has(uint16_t blocker) const { return (logic.blockers() & blocker) != 0; }
 };
 
+static void publishGyroCalibrated() {
+    GyroCalibrationData cal{true, 0.0f, 0.0f, 0.0f};
+    EventService::instance().publish(EventType::GYRO_CALIBRATION, &cal);
+}
+
 void setUp() {
     EventService::instance().reset();
     g_mockMillis = 0;
@@ -64,7 +72,7 @@ void tearDown() {
 // --- Boot and arming conditions ---
 
 void test_boot_is_disarmed_with_blockers() {
-    Sim s(false);
+    Sim s(false, 0, false);
     s.logic.update(0);
     TEST_ASSERT_FALSE(s.logic.isArmed());
     TEST_ASSERT_TRUE(s.has(ArmingBlocker::ALIGNMENT_NOT_VERIFIED));
@@ -72,7 +80,34 @@ void test_boot_is_disarmed_with_blockers() {
     TEST_ASSERT_TRUE(s.has(ArmingBlocker::THROTTLE_NOT_LOW));
     TEST_ASSERT_TRUE(s.has(ArmingBlocker::ARM_SWITCH_NOT_RESET));
     TEST_ASSERT_TRUE(s.has(ArmingBlocker::ATTITUDE_STALE));
+    TEST_ASSERT_TRUE(s.has(ArmingBlocker::GYRO_NOT_CALIBRATED));
     TEST_ASSERT_EQUAL(static_cast<int>(DisarmReason::NONE), static_cast<int>(s.logic.lastDisarmReason()));
+}
+
+void test_gyro_not_calibrated_blocks_until_reported() {
+    Sim s(true, 0, false);
+    s.makeReady();
+    TEST_ASSERT_EQUAL_UINT16(ArmingBlocker::GYRO_NOT_CALIBRATED, s.logic.blockers());
+    s.armSwitch(true);
+    s.run(10);
+    TEST_ASSERT_FALSE(s.logic.isArmed());               // Blocked attempt
+
+    s.logic.onGyroCalibration(true);
+    s.armSwitch(false);
+    s.run(10);
+    s.armSwitch(true);                                  // Fresh OFF->ON toggle
+    s.run(10);
+    TEST_ASSERT_TRUE(s.logic.isArmed());
+}
+
+void test_losing_gyro_calibration_while_armed_disarms() {
+    Sim s;
+    s.arm();
+    TEST_ASSERT_TRUE(s.logic.isArmed());
+    s.logic.onGyroCalibration(false);                   // Must never happen; loud if it does
+    s.run(10);
+    TEST_ASSERT_FALSE(s.logic.isArmed());
+    TEST_ASSERT_EQUAL(static_cast<int>(DisarmReason::SENSOR_FAULT), static_cast<int>(s.logic.lastDisarmReason()));
 }
 
 void test_arms_when_all_clear() {
@@ -364,6 +399,9 @@ void test_module_publishes_events() {
     arming.loop();
     TEST_ASSERT_EQUAL(1, counts.status);   // Initial status published on the first loop
     TEST_ASSERT_FALSE(counts.last.armed);
+    TEST_ASSERT_TRUE((counts.last.blockers & ArmingBlocker::GYRO_NOT_CALIBRATED) != 0);
+    publishGyroCalibrated();
+    TEST_ASSERT_TRUE((counts.last.blockers & ArmingBlocker::GYRO_NOT_CALIBRATED) == 0);
 
     RcInputData rc = makeRc(0.0f, false);
     AttitudeData level{0.0f, 0.0f, 0.0f};
@@ -396,6 +434,7 @@ void test_module_publishes_events() {
 void test_module_loop_fires_timeouts_without_events() {
     ArmingModule arming(true);
     arming.setup();
+    publishGyroCalibrated();
     RcInputData rc = makeRc(0.0f, false);
     AttitudeData level{0.0f, 0.0f, 0.0f};
     for (int i = 0; i < 111; i++) {
@@ -418,6 +457,8 @@ int main() {
     UNITY_BEGIN();
 
     RUN_TEST(test_boot_is_disarmed_with_blockers);
+    RUN_TEST(test_gyro_not_calibrated_blocks_until_reported);
+    RUN_TEST(test_losing_gyro_calibration_while_armed_disarms);
     RUN_TEST(test_arms_when_all_clear);
     RUN_TEST(test_link_must_be_stable_before_arming);
     RUN_TEST(test_alignment_not_verified_blocks);

@@ -14,10 +14,21 @@ private:
 public:
     App() : moduleCount(0) {}
 
-    void registerModule(Module* module) {
-        if (moduleCount < MAX_MODULES) {
-            modules[moduleCount++] = module;
+    // Returns false (and logs an error) if the module list is full or module is null.
+    // SAFETY: a module that silently fails to register (e.g. arming) would never run;
+    // the caller must treat false as fatal.
+    bool registerModule(Module* module) {
+        if (!module) {
+            LOG_E("APP", "registerModule: null module");
+            return false;
         }
+        if (moduleCount >= MAX_MODULES) {
+            LOG_E("APP", "registerModule: list full (MAX_MODULES = %d), '%s' not registered",
+                  MAX_MODULES, module->getName());
+            return false;
+        }
+        modules[moduleCount++] = module;
+        return true;
     }
 
     // Logging must be initialized (logInit()) before this is called.
@@ -30,13 +41,13 @@ public:
         LOG_I("APP", "All modules ready.");
     }
 
+    // Runs every enabled module once. Never blocks: the caller decides how to yield.
     void loop() {
         for (int i = 0; i < moduleCount; i++) {
             if (modules[i]->isEnabled()) {
                 modules[i]->loop();
             }
         }
-        delay(1);
     }
 
     // --- Test helpers ---

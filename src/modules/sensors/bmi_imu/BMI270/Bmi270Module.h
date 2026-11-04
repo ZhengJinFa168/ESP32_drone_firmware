@@ -61,6 +61,10 @@ private:
     // Health
     ImuHealthMonitor _health;
     bool _initialized = false;
+    // A fault found in setup() is published on the first loop(): modules set up
+    // after this one (e.g. arming) have not subscribed yet during setup().
+    ImuHealthMonitor::Change _bootChange = ImuHealthMonitor::Change::NONE;
+    bool _bootReported = false;
     uint32_t _lastRegCheckMs = 0;
 
     static uint32_t nowMs() { return static_cast<uint32_t>(millis()); }
@@ -174,7 +178,7 @@ public:
             // Stay enabled: the module keeps retrying and reports the fault loudly
             LOG_E("BMI270", "init failed (no response or wrong chip ID), will retry");
             _health.onRecoveryAttempt(nowMs());
-            report(_health.onInitResult(false));
+            _bootChange = _health.onInitResult(false);  // Published on the first loop()
         }
 
         // SAFETY: an unverified mounting alignment can flip the drone at takeoff.
@@ -187,6 +191,11 @@ public:
     }
 
     void loop() override {
+        if (!_bootReported) {
+            _bootReported = true;
+            report(_bootChange);
+        }
+
         const uint32_t now = nowMs();
         if (_health.shouldAttemptRecovery(now)) {
             attemptRecovery(now);

@@ -118,11 +118,21 @@ void test_app_handles_max_modules() {
         testApp.registerModule(&modules[i]);
     }
 
-    // Try to register one extra (should be ignored)
+    // Try to register one extra: must be refused loudly, not silently ignored
+    g_mockLog.reset();
     MockModule extra("Extra");
-    testApp.registerModule(&extra);
+    TEST_ASSERT_FALSE(testApp.registerModule(&extra));
+    TEST_ASSERT_FALSE(testApp.registerModule(nullptr));
 
     TEST_ASSERT_EQUAL(MAX, testApp.getModuleCount());
+    TEST_ASSERT_EQUAL(2, g_mockLog.count(LogLevel::ERROR));
+    TEST_ASSERT_TRUE(g_mockLog.contains("'Extra' not registered"));
+}
+
+void test_app_register_returns_true_on_success() {
+    App testApp;
+    MockModule m1("Module1");
+    TEST_ASSERT_TRUE(testApp.registerModule(&m1));
 }
 
 // ============================================
@@ -136,6 +146,7 @@ int main() {
     RUN_TEST(test_app_loop_calls_loop_on_all_modules);
     RUN_TEST(test_app_disabled_module_does_not_run);
     RUN_TEST(test_app_handles_max_modules);
+    RUN_TEST(test_app_register_returns_true_on_success);
 
     return UNITY_END();
 }

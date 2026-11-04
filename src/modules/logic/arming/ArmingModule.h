@@ -89,7 +89,8 @@ public:
         subscribe(EventType::RC_INPUT, onRcInput);
         subscribe(EventType::ATTITUDE_UPDATED, onAttitude);
         subscribe(EventType::SENSOR_FAULT, onSensorFault);
-        step();  // Publish the initial (disarmed) status
+        // No publishing here: modules set up later have not subscribed yet.
+        // The initial (disarmed) status goes out on the first loop() or event.
     }
 
     // Timeouts (RC loss, stale attitude, auto-disarm) must fire even when no events arrive

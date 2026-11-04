@@ -3,10 +3,12 @@
 #include <ESPAsyncWebServer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
+#include <atomic>
 #include "core/eventService/EventType.h"
 #include "core/Log.h"
 #include "config/ArmingConfig.h"
 #include "WebUI.h"
+#include "WebSocketRcPacket.h"
 
 class WebSocketRcProvider {
 private:
@@ -16,23 +18,25 @@ private:
     // Length-1 "mailbox" queue holding the latest RC packet.
     // onWsEvent runs on the async_tcp task, getRcData on loopTask, so the
     // handoff must be thread-safe; the queue does the locking and copying.
+    // Statically allocated: the queue's control block and storage are members.
+    StaticQueue_t _rcQueueControl;
+    uint8_t _rcQueueStorage[sizeof(RcInputData)];
     QueueHandle_t _rcQueue = nullptr;
+
+    // Malformed packets (written on async_tcp, read on loopTask)
+    std::atomic<uint32_t> _malformedPackets{0};
 
     void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len) {
         if (type == WS_EVT_DATA) {
             AwsFrameInfo *info = (AwsFrameInfo*)arg;
             if (info->final && info->index == 0 && info->len == len && info->opcode == WS_TEXT) {
-                data[len] = 0; // Null-terminate
-                char* msg = (char*)data;
-                
-                // Parse "T:0.00,Y:0.00,P:0.00,R:0.00,A:0" (A = arm switch, 0/1)
-                RcInputData parsed = {0.0f, 0.0f, 0.0f, 0.0f, {0, 0, 0, 0}, false};
-                int armSwitch = 0;
-                if (sscanf(msg, "T:%f,Y:%f,P:%f,R:%f,A:%d",
-                           &parsed.throttle, &parsed.yaw, &parsed.pitch, &parsed.roll, &armSwitch) == 5) {
-                    parsed.aux[ARM_AUX_CHANNEL] = armSwitch ? 1 : 0;
-                    parsed.linkOk = true;
+                // Strict parse into a bounded copy (never writes into the frame buffer).
+                // Ranges are checked by RcInputModule for every provider.
+                RcInputData parsed;
+                if (parseWebSocketRcPacket(reinterpret_cast<const char*>(data), len, parsed)) {
                     xQueueOverwrite(_rcQueue, &parsed); // Replaces any unread packet, never blocks
+                } else {
+                    _malformedPackets++;  // Not logged here: logging belongs to the loop task
                 }
             }
         }
@@ -43,7 +47,7 @@ public:
 
     void setup() {
         // Create the mailbox before any WebSocket handler can write to it
-        _rcQueue = xQueueCreate(1, sizeof(RcInputData));
+        _rcQueue = xQueueCreateStatic(1, sizeof(RcInputData), _rcQueueStorage, &_rcQueueControl);
         if (!_rcQueue) {
             LOG_E("WS_RC", "failed to create RC queue, RC input disabled");
             return;
@@ -78,5 +82,8 @@ public:
         // Non-blocking: true only when a new packet arrived since the last call
         return xQueueReceive(_rcQueue, &outData, 0) == pdTRUE;
     }
+
+    // Total packets that did not match the packet format (since boot)
+    uint32_t malformedPackets() const { return _malformedPackets.load(); }
 };
 

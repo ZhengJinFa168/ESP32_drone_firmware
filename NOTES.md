@@ -9,10 +9,7 @@
 - **Current Blockers**: None.
 - **Open Decisions**: IMU mounting alignment (decided at end of build, gates arming), ESC protocol (DShot300 recommended), propeller size, ADC pins for VBAT/CURR (must be G32–G39), GPIO for BMI270 INT pin, motor spin directions.
 - **Known Issues / Next Up**:
-  - RC input values are not range-checked (per conventions: reject + log, don't clamp).
-  - RC queue uses `xQueueCreate` (heap); switch to `xQueueCreateStatic` to satisfy the no-dynamic-allocation rule.
-  - `platformio.ini` uses `^` version ranges; conventions require exact pinned versions.
-  - `App::loop()` uses `delay(1)` (forbidden by conventions); plan is an IMU-interrupt-driven flight task pinned to core 1.
+  - The main loop yields with `vTaskDelay(1)` (1 ms) in `main.cpp`; plan is an IMU-interrupt-driven flight task pinned to core 1.
   - `Bmi270Module` polls in `loop()` instead of using the INT pin.
   - `EscModule` is a stub and has no constructor passing a name to `Module`.
   - Complementary filter uses a fixed `alpha` independent of `dt`; no gyro bias calibration.
@@ -23,6 +20,17 @@
 
 ## Session Log
 *Newest first. Prepend each new session entry directly below this line.*
+
+### [2026-11-04] - Logging and Rule Fixes
+- Built without the board. 3-phase workflow; plan covered 5 items (logging, rule fixes, filter timing, gyro calibration, telemetry); this session did the first two.
+- **Logging** (`core/Log.h`): `LOG_E/W/I/D(tag, fmt, ...)`, compile-time level filter (`FW_LOG_LEVEL`, default INFO). Each line is formatted on the stack (160 B) and written once, so lines from loopTask and async_tcp never interleave. Implementation chosen at compile time: `platform/esp32/Esp32Log.h` (Serial, 1 KB TX buffer) or `test/unit/mocks/MockLog.h` (records lines for assertions). `logTryWrite()` drops data instead of blocking (for telemetry). All modules now log through it; unused `config/env.h` and the estimator's never-enabled CSV stream removed.
+- **Bug found in review: events published in `setup()` were lost.** Modules subscribe in their own `setup()`, so the BMI270's boot `INIT_FAILED` fault never reached arming (only the stale-attitude blocker covered it). The BMI270 boot fault and arming's initial status now go out on the first `loop()`; rule added to `architecture.md`.
+- **Static modules**: `main.cpp` holds the modules as statics (no `new`); `App::registerModule` returns false and logs on overflow/null, and `main` halts loudly if registration fails. `App::loop()` no longer calls `delay(1)`; `main.cpp` yields with `vTaskDelay(1)`.
+- **RC hardening**: the WebSocket handler wrote a terminator one byte past the received frame (`data[len] = 0`); it now parses a bounded 64-byte copy with a strict pure parser (`WebSocketRcPacket.h`: whole message must match, arm value only 0/1). `RcValidation.h` (pure, used by `RcInputModule` for every provider) rejects non-finite values, throttle outside [0, 1], sticks outside [-1, 1] and an invalid arm switch; never clamps. Rejected packets are counted and logged at most once per second. Second bug: the failsafe check only ran when no packet arrived, so a stream of rejected packets would never trigger failsafe; it now runs every loop. RC queue uses `xQueueCreateStatic`.
+- **Pinned versions**: espressif32 7.0.1, native 1.2.1, SparkFun BMI270 1.0.3, ESPAsyncWebServer 3.6.0 (was resolving to 3.6.0 from `^3.3.6`), AsyncTCP 3.3.2 (now explicit), Unity 2.6.1.
+- **Tests**: new `test_log` (6), `test_rc_validation` (10), `test_app` +1, arming setup test updated. Native 90/90; firmware and the hardware tests build.
+- **Not yet tested on hardware**: log output and TX buffer, static RC queue, RC rejection with the real web UI.
+- **Next**: filter timing (commit 3, user has questions), gyro calibration, telemetry.
 
 ### [2026-10-28] - IMU Sensor Health Monitoring
 - Built without the board. 3-phase workflow; decisions: faults auto-clear after 1 s of healthy data (arming already disarmed and needs a switch re-toggle); thresholds below are engineering estimates, to be checked with the wiggle test.

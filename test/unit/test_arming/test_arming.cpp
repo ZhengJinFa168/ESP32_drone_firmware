@@ -360,7 +360,9 @@ void test_module_publishes_events() {
 
     ArmingModule arming(true);
     arming.setup();
-    TEST_ASSERT_EQUAL(1, counts.status);   // Initial status published at setup
+    TEST_ASSERT_EQUAL(0, counts.status);   // Nothing published from setup()
+    arming.loop();
+    TEST_ASSERT_EQUAL(1, counts.status);   // Initial status published on the first loop
     TEST_ASSERT_FALSE(counts.last.armed);
 
     RcInputData rc = makeRc(0.0f, false);

@@ -1,3 +1,5 @@
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include "core/App.h"
 #include "core/Log.h"
 #include "config/FlightConfig.h"
@@ -12,22 +14,45 @@
 using DroneAttitudeEstimator = AttitudeEstimatorModule<ActiveAttitudeFilter>;
 
 // ============================================
+// MODULES (static: no heap, see architecture.md)
+// ============================================
+// Constructors run before setup(); they must not touch hardware or publish events.
+static HeartbeatModule heartbeat(500);
+static BlinkModule blink(LED_BUILTIN);
+static Bmi270Module imu;
+static DroneAttitudeEstimator attitudeEstimator(0.98f);
+static RcInputModule rcInput;
+static ArmingModule arming;
+
+static Module* const MODULES[] = {
+    &heartbeat, &blink, &imu, &attitudeEstimator, &rcInput, &arming,
+};
+
+// ============================================
 // APPLICATION
 // ============================================
-App drone;
+static App drone;
+
+// SAFETY: a missing module (e.g. arming) means the drone runs without its checks.
+// Halt loudly instead of flying with a partial system; motors are never started.
+[[noreturn]] static void haltWithError(const char* what) {
+    for (;;) {
+        LOG_E("MAIN", "HALTED: %s", what);
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+}
 
 void setup() {
     logInit();
-    drone.registerModule(new HeartbeatModule(500));
-    drone.registerModule(new BlinkModule(LED_BUILTIN));
-    drone.registerModule(new Bmi270Module());
-    drone.registerModule(new DroneAttitudeEstimator(0.98f));
-    drone.registerModule(new RcInputModule());
-    drone.registerModule(new ArmingModule());
+    for (Module* module : MODULES) {
+        if (!drone.registerModule(module)) haltWithError("module registration failed (see above)");
+    }
     drone.setup();
     LOG_I("MAIN", "System running");
 }
 
 void loop() {
     drone.loop();
+    // Yield one tick (1 ms) so lower-priority tasks (idle, watchdog) can run
+    vTaskDelay(1);
 }

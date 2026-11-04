@@ -16,6 +16,7 @@ using ActiveAttitudeFilter = ComplementaryFilter;
 // about this many seconds. Larger = less motor vibration in the attitude, slower
 // drift correction. [TO TUNE on hardware]
 constexpr float ATTITUDE_FILTER_TAU_S = 0.5f;
+static_assert(ATTITUDE_FILTER_TAU_S > 0.0f, "ATTITUDE_FILTER_TAU_S must be > 0");
 
 // A gap between IMU samples longer than this means data was missing (fault,
 // recovery, stall): the estimator re-initializes from the accelerometer and logs a

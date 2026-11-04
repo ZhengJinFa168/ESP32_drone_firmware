@@ -14,19 +14,25 @@
 // with that sample's real dt. (A fixed alpha = 0.98 means tau = 0.12 s at 400 Hz but
 // tau = 0.05 s at 1 kHz.)
 // Larger tau: smoother, less vibration in the attitude, slower drift correction.
+//
+// tau has no default here: the firmware value lives in config/FlightConfig.h
+// (ATTITUDE_FILTER_TAU_S). An invalid tau (not a positive finite number) makes the
+// filter unusable instead of substituting a guess: update() does nothing, no
+// attitude is produced, and arming stays blocked on a stale attitude.
 class ComplementaryFilter {
 private:
     float _roll = 0.0f;    // Estimated roll angle (deg)
     float _pitch = 0.0f;   // Estimated pitch angle (deg)
     float _yaw = 0.0f;     // Estimated yaw angle (deg)
 
-    float _tauS = 0.5f;    // Time constant (s)
+    float _tauS = 0.0f;    // Time constant (s)
+    bool _validConfig = false;
     bool _initialized = false;
 
     static bool isValidTau(float tauS) { return std::isfinite(tauS) && tauS > 0.0f; }
 
 public:
-    explicit ComplementaryFilter(float tauS = 0.5f) : _tauS(isValidTau(tauS) ? tauS : 0.5f) {}
+    explicit ComplementaryFilter(float tauS) : _tauS(tauS), _validConfig(isValidTau(tauS)) {}
 
     // Reset filter states; the next update snaps to the accelerometer
     void reset() {
@@ -40,8 +46,12 @@ public:
     bool setTimeConstant(float tauS) {
         if (!isValidTau(tauS)) return false;
         _tauS = tauS;
+        _validConfig = true;
         return true;
     }
+
+    // False if constructed with an invalid tau: the filter produces no attitude
+    bool hasValidConfig() const { return _validConfig; }
 
     float getTimeConstant() const { return _tauS; }
     float getRoll() const { return _roll; }
@@ -53,6 +63,8 @@ public:
     // ax, ay, az in g; gx, gy, gz in deg/s; dt in seconds (time since the previous sample).
     // The first update after construction/reset snaps to the accelerometer (dt ignored).
     void update(float ax, float ay, float az, float gx, float gy, float gz, float dt) {
+        if (!_validConfig) return;  // SAFETY: never estimate with an invalid tau
+
         // Calculate roll and pitch from accelerometer
         const float rollAcc = std::atan2(ay, az) * RAD2DEG;
         const float pitchAcc = std::atan2(-ax, std::sqrt(ay * ay + az * az)) * RAD2DEG;

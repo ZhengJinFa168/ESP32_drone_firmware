@@ -14,7 +14,7 @@ void tearDown() {
 }
 
 void test_filter_level_steady_state() {
-    ComplementaryFilter filter;
+    ComplementaryFilter filter(0.5f);
     // Flat on table: gravity points downward through Z axis (1g)
     filter.update(0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.002f);
 
@@ -24,7 +24,7 @@ void test_filter_level_steady_state() {
 }
 
 void test_filter_roll_step_convergence() {
-    ComplementaryFilter filter;
+    ComplementaryFilter filter(0.5f);
     // 30 degree roll tilt: ay = sin(30 deg) = 0.5g, az = cos(30 deg) = 0.866025g
     const float angleRad = 30.0f * (3.14159265f / 180.0f);
     const float ay = std::sin(angleRad);
@@ -37,7 +37,7 @@ void test_filter_roll_step_convergence() {
 }
 
 void test_filter_pitch_step_convergence() {
-    ComplementaryFilter filter;
+    ComplementaryFilter filter(0.5f);
     // -25 degree pitch tilt: ax = -sin(-25 deg), az = cos(-25 deg)
     const float angleRad = -25.0f * (3.14159265f / 180.0f);
     const float ax = -std::sin(angleRad);
@@ -50,7 +50,7 @@ void test_filter_pitch_step_convergence() {
 }
 
 void test_filter_yaw_integration() {
-    ComplementaryFilter filter;
+    ComplementaryFilter filter(0.5f);
     filter.update(0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.002f);
 
     // Rotate at 60 deg/s around Z axis for 1.0s (100 steps of 0.01s)
@@ -64,7 +64,7 @@ void test_filter_yaw_integration() {
 }
 
 void test_filter_gyro_fast_response_roll() {
-    ComplementaryFilter filter;
+    ComplementaryFilter filter(0.5f);
     // Start aligned level
     filter.update(0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.002f);
 
@@ -158,6 +158,22 @@ static void publishImu(float gx, uint32_t timestampUs, float ay = 0.0f, float az
     EventService::instance().publish(EventType::IMU_RAW, &imu);
 }
 
+void test_invalid_construction_produces_no_attitude() {
+    ComplementaryFilter filter(0.0f);
+    TEST_ASSERT_FALSE(filter.hasValidConfig());
+    filter.update(0.0f, 0.5f, 0.866f, 0.0f, 0.0f, 0.0f, 0.0025f);
+    TEST_ASSERT_FALSE(filter.isInitialized());           // Nothing estimated
+
+    AttitudeEstimatorModule<ComplementaryFilter> estimator(NAN);
+    estimator.setup();
+    TEST_ASSERT_EQUAL(1, g_mockLog.count(LogLevel::ERROR));  // Loud at setup
+    AttitudeSink sink;
+    subscribeSink(sink);
+    publishImu(0.0f, 1000);
+    publishImu(0.0f, 3500);
+    TEST_ASSERT_EQUAL(0, sink.count);                    // Never publishes: arming stays blocked
+}
+
 void test_dt_comes_from_timestamps() {
     AttitudeEstimatorModule<ComplementaryFilter> estimator(0.5f);
     estimator.setup();
@@ -239,6 +255,7 @@ int main() {
     RUN_TEST(test_module_event_integration);
     RUN_TEST(test_time_constant_independent_of_rate);
     RUN_TEST(test_invalid_time_constant_rejected);
+    RUN_TEST(test_invalid_construction_produces_no_attitude);
     RUN_TEST(test_dt_comes_from_timestamps);
     RUN_TEST(test_microsecond_wraparound_is_not_a_gap);
     RUN_TEST(test_gap_reinitializes_and_skips_publish);

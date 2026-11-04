@@ -52,7 +52,8 @@ private:
         _haveLastSample = true;
 
         _filter.update(imu.ax, imu.ay, imu.az, imu.gx, imu.gy, imu.gz, dt);
-        if (!publishResult) return;
+        // An unusable filter (invalid config) produces nothing: arming sees a stale attitude
+        if (!publishResult || !_filter.isInitialized()) return;
 
         AttitudeData attitude{_filter.getRoll(), _filter.getPitch(), _filter.getYaw()};
         publish(EventType::ATTITUDE_UPDATED, &attitude);
@@ -65,6 +66,10 @@ public:
 
     void setup() override {
         reset();
+        // Logged here, not in the constructor: static modules are constructed before logInit()
+        if (!_filter.hasValidConfig()) {
+            LOG_E("ATTITUDE", "invalid filter configuration (time constant), no attitude will be published");
+        }
         subscribe(EventType::IMU_RAW, onImuRaw);
     }
 

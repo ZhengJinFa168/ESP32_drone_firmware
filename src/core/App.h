@@ -1,8 +1,7 @@
-#ifndef APP_H
-#define APP_H
-
+#pragma once
 #include "Module.h"
 #include "CoreConfig.h"
+#include "Log.h"
 
 class App {
 public:
@@ -21,15 +20,14 @@ public:
         }
     }
 
+    // Logging must be initialized (logInit()) before this is called.
     void setup() {
-        Serial.begin(115200);
-        Serial.println("Initializing modules...");
+        LOG_I("APP", "Initializing modules...");
         for (int i = 0; i < moduleCount; i++) {
-            Serial.print("  ✓ ");
-            Serial.println(modules[i]->getName());
+            LOG_I("APP", "  setup: %s", modules[i]->getName());
             modules[i]->setup();
         }
-        Serial.println("All modules ready.");
+        LOG_I("APP", "All modules ready.");
     }
 
     void loop() {
@@ -47,5 +45,3 @@ public:
         return (index >= 0 && index < moduleCount) ? modules[index] : nullptr;
     }
 };
-
-#endif

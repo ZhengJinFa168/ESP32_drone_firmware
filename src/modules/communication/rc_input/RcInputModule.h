@@ -1,5 +1,6 @@
 #pragma once
 #include "core/Module.h"
+#include "core/Log.h"
 
 // --- CONFIGURATION ---
 // Swap these defines to change the RC input method at compile time
@@ -39,7 +40,7 @@ public:
             _lastDataTime = millis();
             
             if (_inFailsafe) {
-                Serial.println("RC Link Recovered!");
+                LOG_I("RC", "link recovered");
                 _inFailsafe = false;
             }
             
@@ -48,7 +49,7 @@ public:
             // Check for failsafe
             if (!_inFailsafe && (millis() - _lastDataTime > FAILSAFE_TIMEOUT_MS)) {
                 _inFailsafe = true;
-                Serial.println("RC SIGNAL LOST! Failsafe triggered.");
+                LOG_E("RC", "SIGNAL LOST, failsafe packet published");
                 
                 // Publish failsafe state: zero throttle, neutral sticks, linkOk = false so
                 // consumers (arming, flight logic) can tell it apart from real pilot input

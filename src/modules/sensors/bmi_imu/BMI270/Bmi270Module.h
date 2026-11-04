@@ -33,6 +33,7 @@
  */
 #include <SparkFun_BMI270_Arduino_Library.h>
 #include <Wire.h>
+#include "core/Log.h"
 #include "config/SensorConfig.h"
 #include "config/pins.h"
 #include "modules/sensors/bmi_imu/ImuHealthMonitor.h"
@@ -117,13 +118,13 @@ private:
 
     void attemptRecovery(uint32_t now) {
         _health.onRecoveryAttempt(now);
-        Serial.println("BMI270: recovery attempt (I2C bus reset + re-init, loop blocked briefly)...");
+        LOG_W("BMI270", "recovery attempt (I2C bus reset + re-init, loop blocked briefly)...");
         recoverBus();
         _initialized = initSensor();
         if (_initialized) {
-            Serial.println("BMI270: re-initialized, fault clears after healthy data");
+            LOG_I("BMI270", "re-initialized, fault clears after healthy data");
         } else {
-            Serial.println("BMI270: recovery failed, will retry");
+            LOG_E("BMI270", "recovery failed, will retry");
             report(_health.onInitResult(false));
         }
         _lastReadTimeUs = micros();
@@ -135,12 +136,10 @@ private:
         if (change == ImuHealthMonitor::Change::NONE) return;
 
         if (change == ImuHealthMonitor::Change::FAULT_RAISED) {
-            Serial.print("SENSOR FAULT: IMU, reason: ");
-            Serial.print(sensorFaultReasonName(_health.reason()));
-            Serial.print(", fault count: ");
-            Serial.println(_health.faultCount());
+            LOG_E("BMI270", "SENSOR FAULT, reason: %s, fault count: %lu",
+                  sensorFaultReasonName(_health.reason()), static_cast<unsigned long>(_health.faultCount()));
         } else {
-            Serial.println("SENSOR OK: IMU fault cleared");
+            LOG_I("BMI270", "SENSOR OK, fault cleared");
         }
 
         SensorFaultData fault{SensorId::IMU, _health.isFaulty(), _health.reason()};
@@ -166,21 +165,21 @@ public:
 
     void setup() override {
         beginBus();
-        Serial.println("Initializing BMI270...");
+        LOG_I("BMI270", "initializing...");
 
         _initialized = initSensor();
         if (_initialized) {
-            Serial.println("BMI270 initialized successfully.");
+            LOG_I("BMI270", "initialized");
         } else {
             // Stay enabled: the module keeps retrying and reports the fault loudly
-            Serial.println("ERROR: BMI270 init failed (no response or wrong chip ID). Will retry.");
+            LOG_E("BMI270", "init failed (no response or wrong chip ID), will retry");
             _health.onRecoveryAttempt(nowMs());
             report(_health.onInitResult(false));
         }
 
         // SAFETY: an unverified mounting alignment can flip the drone at takeoff.
         if (!IMU_ALIGNMENT_VERIFIED) {
-            Serial.println("WARNING: IMU alignment NOT verified (SensorConfig.h) - arming will be blocked.");
+            LOG_W("BMI270", "IMU alignment NOT verified (SensorConfig.h), arming will be blocked");
         }
 
         _lastReadTimeUs = micros();

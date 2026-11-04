@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include "core/Module.h"
+#include "core/Log.h"
 #include "config/SensorConfig.h"
 #include "ArmingLogic.h"
 
@@ -43,11 +44,10 @@ private:
         const ArmingStatusData status = _logic.status();
 
         if (transition == ArmingLogic::Transition::ARMED) {
-            Serial.println("ARMING: ARMED");
+            LOG_I("ARMING", "ARMED");
             publish(EventType::ARMED, &status);
         } else if (transition == ArmingLogic::Transition::DISARMED) {
-            Serial.print("ARMING: DISARMED, reason: ");
-            Serial.println(disarmReasonName(status.lastDisarmReason));
+            LOG_W("ARMING", "DISARMED, reason: %s", disarmReasonName(status.lastDisarmReason));
             publish(EventType::DISARMED, &status);
         }
 
@@ -66,17 +66,19 @@ private:
 
     static void logBlockers(uint16_t blockers) {
         if (blockers == 0) {
-            Serial.println("ARMING: ready to arm (turn the arm switch ON)");
+            LOG_I("ARMING", "ready to arm (turn the arm switch ON)");
             return;
         }
-        Serial.print("ARMING: blocked by:");
+        // Build the whole list first so it goes out as one log line
+        char list[LOG_LINE_MAX] = "";
+        size_t len = 0;
         for (uint16_t bit = 1; bit != 0; bit <<= 1) {
-            if (blockers & bit) {
-                Serial.print(" ");
-                Serial.print(armingBlockerName(bit));
+            if ((blockers & bit) && len < sizeof(list)) {
+                const int n = std::snprintf(list + len, sizeof(list) - len, " %s", armingBlockerName(bit));
+                if (n > 0) len += static_cast<size_t>(n);
             }
         }
-        Serial.println("");
+        LOG_I("ARMING", "blocked by:%s", list);
     }
 
 public:

@@ -4,6 +4,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include "core/eventService/EventType.h"
+#include "core/Log.h"
 #include "config/ArmingConfig.h"
 #include "WebUI.h"
 
@@ -44,15 +45,14 @@ public:
         // Create the mailbox before any WebSocket handler can write to it
         _rcQueue = xQueueCreate(1, sizeof(RcInputData));
         if (!_rcQueue) {
-            Serial.println("Error: failed to create RC queue. RC input disabled.");
+            LOG_E("WS_RC", "failed to create RC queue, RC input disabled");
             return;
         }
 
         // Start WiFi Access Point
-        Serial.println("Starting WiFi AP...");
+        LOG_I("WS_RC", "starting WiFi AP...");
         WiFi.softAP("ESP32_Drone", "password123");
-        Serial.print("AP IP address: ");
-        Serial.println(WiFi.softAPIP());
+        LOG_I("WS_RC", "AP IP address: %s", WiFi.softAPIP().toString().c_str());
 
         // Setup WebSocket
         ws.onEvent([this](AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len) {
@@ -66,7 +66,7 @@ public:
         });
 
         server.begin();
-        Serial.println("Web Server started");
+        LOG_I("WS_RC", "web server started");
     }
 
     bool getRcData(RcInputData& outData) {

@@ -11,7 +11,6 @@
 - **Known Issues / Next Up**:
   - RC input values are not range-checked (per conventions: reject + log, don't clamp).
   - RC queue uses `xQueueCreate` (heap); switch to `xQueueCreateStatic` to satisfy the no-dynamic-allocation rule.
-  - Code uses `Serial.print` instead of standard logging (`log_e`/`log_i`), against conventions.
   - `platformio.ini` uses `^` version ranges; conventions require exact pinned versions.
   - `App::loop()` uses `delay(1)` (forbidden by conventions); plan is an IMU-interrupt-driven flight task pinned to core 1.
   - `Bmi270Module` polls in `loop()` instead of using the INT pin.

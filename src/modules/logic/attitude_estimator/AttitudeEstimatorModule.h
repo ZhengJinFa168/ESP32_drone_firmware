@@ -8,7 +8,6 @@ class AttitudeEstimatorModule : public Module {
 private:
     TFilter _filter;
     unsigned long _lastTimeUs = 0;
-    bool _telemetryStream = false;
 
     // Static C-style callback — no heap allocation, fully inlineable
     static void onImuRaw(void* ctx, const void* data) {
@@ -29,15 +28,6 @@ private:
 
         AttitudeData attitude{self->_filter.getRoll(), self->_filter.getPitch(), self->_filter.getYaw()};
         self->publish(EventType::ATTITUDE_UPDATED, &attitude);
-
-        // Output CSV format "roll,pitch,yaw" for scripts/plot_telemetry.py if enabled
-        if (self->_telemetryStream) {
-            Serial.print(attitude.roll);
-            Serial.print(",");
-            Serial.print(attitude.pitch);
-            Serial.print(",");
-            Serial.println(attitude.yaw);
-        }
     }
 
 public:
@@ -57,5 +47,4 @@ public:
     float getPitch() const { return _filter.getPitch(); }
     float getYaw() const { return _filter.getYaw(); }
     void reset() { _filter.reset(); _lastTimeUs = 0; }
-    void enableTelemetryStream(bool enable) { _telemetryStream = enable; }
 };

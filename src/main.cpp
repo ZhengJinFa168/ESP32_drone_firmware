@@ -1,4 +1,5 @@
 #include "core/App.h"
+#include "core/Log.h"
 #include "config/FlightConfig.h"
 #include "modules/actuators/blink/BlinkModule.h"
 #include "modules/logic/heartbeat/HeartbeatModule.h"
@@ -16,6 +17,7 @@ using DroneAttitudeEstimator = AttitudeEstimatorModule<ActiveAttitudeFilter>;
 App drone;
 
 void setup() {
+    logInit();
     drone.registerModule(new HeartbeatModule(500));
     drone.registerModule(new BlinkModule(LED_BUILTIN));
     drone.registerModule(new Bmi270Module());
@@ -23,7 +25,7 @@ void setup() {
     drone.registerModule(new RcInputModule());
     drone.registerModule(new ArmingModule());
     drone.setup();
-    Serial.println("System Running!");
+    LOG_I("MAIN", "System running");
 }
 
 void loop() {

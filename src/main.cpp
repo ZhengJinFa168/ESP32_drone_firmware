@@ -20,7 +20,7 @@ using DroneAttitudeEstimator = AttitudeEstimatorModule<ActiveAttitudeFilter>;
 static HeartbeatModule heartbeat(500);
 static BlinkModule blink(LED_BUILTIN);
 static Bmi270Module imu;
-static DroneAttitudeEstimator attitudeEstimator(0.98f);
+static DroneAttitudeEstimator attitudeEstimator(ATTITUDE_FILTER_TAU_S);
 static RcInputModule rcInput;
 static ArmingModule arming;
 

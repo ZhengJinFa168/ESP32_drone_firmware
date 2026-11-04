@@ -227,7 +227,7 @@ public:
         applyAlignment(IMU_ALIGNMENT, acc, acc);
         applyAlignment(IMU_ALIGNMENT, gyro, gyro);
 
-        ImuData data{acc[0], acc[1], acc[2], gyro[0], gyro[1], gyro[2]};
+        ImuData data{acc[0], acc[1], acc[2], gyro[0], gyro[1], gyro[2], static_cast<uint32_t>(nowUs)};
 
         // Publish IMU_RAW event (body frame)
         publish(EventType::IMU_RAW, &data);

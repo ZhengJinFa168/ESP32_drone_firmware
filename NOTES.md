@@ -12,11 +12,11 @@
   - The main loop yields with `vTaskDelay(1)` (1 ms) in `main.cpp`; plan is an IMU-interrupt-driven flight task pinned to core 1.
   - `Bmi270Module` polls in `loop()` instead of using the INT pin.
   - `EscModule` is a stub and has no constructor passing a name to `Module`.
-  - Complementary filter uses a fixed `alpha` independent of `dt`; no gyro bias calibration.
+  - No gyro bias calibration.
   - `send_P` deprecation warning in `WebSocketRcProvider.h`.
   - BMI270 can get stuck (CHIP_ID reads 0x20 instead of 0x24, init returns -3) and an ESP32 reset does not clear it, only a power cycle does. Bus recovery + retry now implemented (untested on hardware); if it can't clear the stuck state, the sensor's power must be switchable.
   - `Module.h` includes `Arduino.h` (every module touches Arduino); fix with the Stage 2 platform layer.
-  - `ComplementaryFilter.h` redefines `RAD_TO_DEG`/`DEG_TO_RAD` (clashes with Arduino.h); `test_basic` is an empty test file.
+  - `test_basic` is an empty test file.
 
 ## Session Log
 *Newest first. Prepend each new session entry directly below this line.*

@@ -1,33 +1,61 @@
 #pragma once
-#include <Arduino.h>
+#include <cstdint>
 #include <utility>
 #include "core/Module.h"
+#include "core/Log.h"
+#include "config/FlightConfig.h"
 
+// Turns IMU_RAW into ATTITUDE_UPDATED with the configured filter.
+// dt comes from the sample timestamps set by the IMU driver (ImuData::timestampUs),
+// not from when the event is handled, so loop delays do not distort the integration.
+// Uses no hardware clock itself.
 template <typename TFilter>
 class AttitudeEstimatorModule : public Module {
 private:
     TFilter _filter;
-    unsigned long _lastTimeUs = 0;
+    uint32_t _lastSampleUs = 0;
+    bool _haveLastSample = false;
+    uint32_t _gapResets = 0;
+
+    static constexpr uint32_t MAX_GAP_US = ESTIMATOR_MAX_GAP_MS * 1000u;
 
     // Static C-style callback — no heap allocation, fully inlineable
     static void onImuRaw(void* ctx, const void* data) {
         if (!data) return;
         auto* self = static_cast<AttitudeEstimatorModule*>(ctx);
-        const auto* imu = static_cast<const ImuData*>(data);
+        self->handleSample(*static_cast<const ImuData*>(data));
+    }
 
-        unsigned long now = micros();
-        float dt = 0.002f; // Default 500 Hz (2ms) fallback
-        if (self->_lastTimeUs > 0 && now > self->_lastTimeUs) {
-            dt = static_cast<float>(now - self->_lastTimeUs) * 1e-6f;
-            // Clamp dt to avoid glitches if execution paused
-            if (dt > 0.05f) dt = 0.002f;
+    void handleSample(const ImuData& imu) {
+        float dt = 0.0f;  // First sample: the filter snaps to the accelerometer
+        bool publishResult = true;
+
+        if (_haveLastSample) {
+            // Unsigned subtraction: correct across the 32-bit microsecond wrap (~71 min)
+            const uint32_t dtUs = imu.timestampUs - _lastSampleUs;
+            if (dtUs == 0) return;  // Same sample delivered twice: nothing new
+
+            if (dtUs > MAX_GAP_US) {
+                // Data was missing (or the timestamp went backwards, which wraps to a
+                // huge dt). Integrating across the gap would be wrong: re-initialize.
+                // SAFETY: the reset sample is not published (see FlightConfig.h).
+                _gapResets++;
+                LOG_W("ATTITUDE", "IMU gap of %lu us, estimator re-initialized (resets: %lu)",
+                      static_cast<unsigned long>(dtUs), static_cast<unsigned long>(_gapResets));
+                _filter.reset();
+                publishResult = false;
+            } else {
+                dt = static_cast<float>(dtUs) * 1e-6f;
+            }
         }
-        self->_lastTimeUs = now;
+        _lastSampleUs = imu.timestampUs;
+        _haveLastSample = true;
 
-        self->_filter.update(imu->ax, imu->ay, imu->az, imu->gx, imu->gy, imu->gz, dt);
+        _filter.update(imu.ax, imu.ay, imu.az, imu.gx, imu.gy, imu.gz, dt);
+        if (!publishResult) return;
 
-        AttitudeData attitude{self->_filter.getRoll(), self->_filter.getPitch(), self->_filter.getYaw()};
-        self->publish(EventType::ATTITUDE_UPDATED, &attitude);
+        AttitudeData attitude{_filter.getRoll(), _filter.getPitch(), _filter.getYaw()};
+        publish(EventType::ATTITUDE_UPDATED, &attitude);
     }
 
 public:
@@ -36,8 +64,7 @@ public:
         : Module("ATTITUDE_ESTIMATOR"), _filter(std::forward<Args>(args)...) {}
 
     void setup() override {
-        _filter.reset();
-        _lastTimeUs = 0;
+        reset();
         subscribe(EventType::IMU_RAW, onImuRaw);
     }
 
@@ -46,5 +73,10 @@ public:
     float getRoll() const { return _filter.getRoll(); }
     float getPitch() const { return _filter.getPitch(); }
     float getYaw() const { return _filter.getYaw(); }
-    void reset() { _filter.reset(); _lastTimeUs = 0; }
+    uint32_t gapResets() const { return _gapResets; }
+    void reset() {
+        _filter.reset();
+        _haveLastSample = false;
+        _lastSampleUs = 0;
+    }
 };

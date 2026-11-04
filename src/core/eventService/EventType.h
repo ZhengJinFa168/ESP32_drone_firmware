@@ -33,8 +33,9 @@ enum class EventType : uint8_t {
 // ============================================
 // Body frame FLU: X forward, Y left, Z up. Level and still: az = +1 g.
 struct ImuData {
-    float ax, ay, az;   // Accelerometer (g)
-    float gx, gy, gz;   // Gyroscope (deg/s)
+    float ax, ay, az;      // Accelerometer (g)
+    float gx, gy, gz;      // Gyroscope (deg/s)
+    uint32_t timestampUs;  // When the sample was read (microsecond clock, wraps ~71 min)
 };
 
 struct AttitudeData {

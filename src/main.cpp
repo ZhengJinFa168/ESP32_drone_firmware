@@ -9,6 +9,7 @@
 #include "modules/sensors/bmi_imu/BMI270/Bmi270Module.h"
 #include "modules/communication/rc_input/RcInputModule.h"
 #include "modules/logic/arming/ArmingModule.h"
+#include "modules/logic/telemetry/TelemetryModule.h"
 
 // Define the drone's specific attitude module using the configured filter
 using DroneAttitudeEstimator = AttitudeEstimatorModule<ActiveAttitudeFilter>;
@@ -23,9 +24,10 @@ static Bmi270Module imu;
 static DroneAttitudeEstimator attitudeEstimator(ATTITUDE_FILTER_TAU_S);
 static RcInputModule rcInput;
 static ArmingModule arming;
+static TelemetryModule telemetry;
 
 static Module* const MODULES[] = {
-    &heartbeat, &blink, &imu, &attitudeEstimator, &rcInput, &arming,
+    &heartbeat, &blink, &imu, &attitudeEstimator, &rcInput, &arming, &telemetry,
 };
 
 // ============================================

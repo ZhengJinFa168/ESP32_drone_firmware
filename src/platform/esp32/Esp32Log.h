@@ -2,7 +2,9 @@
 // ESP32 implementation of core/Log.h. Include core/Log.h, not this file.
 #include <Arduino.h>
 
-constexpr unsigned long LOG_BAUD = 115200;
+// 921600 leaves room for telemetry (~13 KB/s at 50 Hz); set Teleplot and the
+// serial monitor (monitor_speed in platformio.ini) to the same rate.
+constexpr unsigned long LOG_BAUD = 921600;
 // Software TX buffer behind the 128-byte UART FIFO. Lets logTryWrite() queue a full
 // telemetry frame without waiting; normal log lines block only when it is full.
 constexpr size_t LOG_TX_BUFFER_SIZE = 1024;

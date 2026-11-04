@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 #include "eventService/EventService.h"
+#include "Log.h"
 
 class Module {
 protected:
@@ -14,8 +15,15 @@ protected:
         EventService::instance().publish(type, data);
     }
 
+    // Logs an error if the event's listener slots are full (CORE_MAX_LISTENERS_PER_EVENT):
+    // a module that silently misses its events (e.g. arming) would be unsafe.
     bool subscribe(EventType type, EventCallback cb) {
-        return EventService::instance().subscribe(type, cb, this);
+        const bool ok = EventService::instance().subscribe(type, cb, this);
+        if (!ok) {
+            LOG_E("MODULE", "%s: subscribe failed for event %d (listener limit reached)",
+                  name, static_cast<int>(type));
+        }
+        return ok;
     }
 
 public:

@@ -4,7 +4,7 @@
 
 ## Current State
 - **Phase**: Firmware Architecture Setup & Sensor Integration
-- **Working Components**: Module base class, EventService (Pub/Sub), Complementary Filter attitude estimator, BMI270 IMU module (I2C, verified on hardware), WebSocket RC input module (builds; not yet tested on hardware).
+- **Working Components**: Module base class, EventService (Pub/Sub), logging (`core/Log.h`), Teleplot telemetry (921600 baud), gyro calibration at boot, Complementary Filter attitude estimator (time-constant based), BMI270 IMU module (I2C, verified on hardware), WebSocket RC input module (builds; not yet tested on hardware).
 - **Hardware**: Fully mapped in `.agents/rules/hardware_map.md` (ground truth) with diagram `docs/wiring.jpg`. `src/config/pins.h` matches it.
 - **Current Blockers**: None.
 - **Open Decisions**: IMU mounting alignment (decided at end of build, gates arming), ESC protocol (DShot300 recommended), propeller size, ADC pins for VBAT/CURR (must be G32–G39), GPIO for BMI270 INT pin, motor spin directions.
@@ -20,16 +20,20 @@
 ## Session Log
 *Newest first. Prepend each new session entry directly below this line.*
 
-### [2026-11-04] - Logging and Rule Fixes
-- Built without the board. 3-phase workflow; plan covered 5 items (logging, rule fixes, filter timing, gyro calibration, telemetry); this session did the first two.
+### [2026-11-04] - Logging, Rule Fixes, Filter Timing, Gyro Calibration, Telemetry
+- Built without the board. 3-phase workflow; one plan for 5 items, one commit each.
 - **Logging** (`core/Log.h`): `LOG_E/W/I/D(tag, fmt, ...)`, compile-time level filter (`FW_LOG_LEVEL`, default INFO). Each line is formatted on the stack (160 B) and written once, so lines from loopTask and async_tcp never interleave. Implementation chosen at compile time: `platform/esp32/Esp32Log.h` (Serial, 1 KB TX buffer) or `test/unit/mocks/MockLog.h` (records lines for assertions). `logTryWrite()` drops data instead of blocking (for telemetry). All modules now log through it; unused `config/env.h` and the estimator's never-enabled CSV stream removed.
 - **Bug found in review: events published in `setup()` were lost.** Modules subscribe in their own `setup()`, so the BMI270's boot `INIT_FAILED` fault never reached arming (only the stale-attitude blocker covered it). The BMI270 boot fault and arming's initial status now go out on the first `loop()`; rule added to `architecture.md`.
 - **Static modules**: `main.cpp` holds the modules as statics (no `new`); `App::registerModule` returns false and logs on overflow/null, and `main` halts loudly if registration fails. `App::loop()` no longer calls `delay(1)`; `main.cpp` yields with `vTaskDelay(1)`.
 - **RC hardening**: the WebSocket handler wrote a terminator one byte past the received frame (`data[len] = 0`); it now parses a bounded 64-byte copy with a strict pure parser (`WebSocketRcPacket.h`: whole message must match, arm value only 0/1). `RcValidation.h` (pure, used by `RcInputModule` for every provider) rejects non-finite values, throttle outside [0, 1], sticks outside [-1, 1] and an invalid arm switch; never clamps. Rejected packets are counted and logged at most once per second. Second bug: the failsafe check only ran when no packet arrived, so a stream of rejected packets would never trigger failsafe; it now runs every loop. RC queue uses `xQueueCreateStatic`.
 - **Pinned versions**: espressif32 7.0.1, native 1.2.1, SparkFun BMI270 1.0.3, ESPAsyncWebServer 3.6.0 (was resolving to 3.6.0 from `^3.3.6`), AsyncTCP 3.3.2 (now explicit), Unity 2.6.1.
-- **Tests**: new `test_log` (6), `test_rc_validation` (10), `test_app` +1, arming setup test updated. Native 90/90; firmware and the hardware tests build.
-- **Not yet tested on hardware**: log output and TX buffer, static RC queue, RC rejection with the real web UI.
-- **Next**: filter timing (commit 3, user has questions), gyro calibration, telemetry.
+- **Filter timing**: the complementary filter takes a time constant (`ATTITUDE_FILTER_TAU_S = 0.5 s` in `FlightConfig.h`, to tune) and computes `alpha = tau/(tau+dt)` per sample; the old fixed 0.98 meant tau = 0.12 s at 400 Hz. `ImuData::timestampUs` is set by the driver and the estimator computes dt from it (wrap-safe), no longer calling `micros()`. A gap > 50 ms or a backwards timestamp re-initializes the filter with a warning (was: silently dt = 2 ms); the reset sample is not published so arming disarms on a stale attitude even if the whole loop stalled. `RAD2DEG`/`DEG2RAD` float constants (`utils/MathConstants.h`) replace `RAD_TO_DEG`: on the board Arduino's double macro won, causing software double math and different code than the native tests.
+- **Gyro calibration** (`GyroCalibrator.h`, pure): averages 400 still samples (1 s) at boot; restarts on gyro spread > 2 deg/s, accel magnitude outside 0.9–1.1 g, non-finite values or bias > 5 deg/s; no timeout. Thresholds in `SensorConfig.h` are estimates, to tune with the board. `Bmi270Module` publishes no `IMU_RAW` until calibrated, then subtracts the bias; a sensor fault restarts calibration. New `GYRO_CALIBRATION` event and `GYRO_NOT_CALIBRATED` blocker (set until the event arrives; losing calibration while armed disarms, cannot happen today). `test_bmi270` waits up to 3 s for calibration (board must be still).
+- **Telemetry** (`TelemetryFormatter.h` pure + `TelemetryModule`): one Teleplot frame (attitude, gyro/accel, armed/blockers/rcLink/imuFault/gyroCal, RC, `tlmDrop`) at 50 Hz via `logTryWrite()`; dropped and counted when the TX buffer is full, refused (logged once) if larger than `TELEMETRY_FRAME_MAX`. Config in `config/TelemetryConfig.h`. **Serial is now 921600 baud** (`LOG_BAUD`, `monitor_speed`): set Teleplot to 921600.
+- `Module::subscribe` logs an error when an event's listener slots are full.
+- **Tests**: new `test_log` (6), `test_rc_validation` (10), `test_gyro_calibration` (10), `test_telemetry` (9); estimator +7, arming +2, `test_app` +1. Native 118/118; firmware and the hardware tests build.
+- **Not yet tested on hardware**: log output and TX buffer at 921600, static RC queue, RC rejection with the real web UI, calibration thresholds, telemetry drop rate, `test_bmi270` with calibration.
+- **Next (with the board)**: wiggle test, health/recovery and calibration on the real sensor, arming via the web UI, tune tau.
 
 ### [2026-10-28] - IMU Sensor Health Monitoring
 - Built without the board. 3-phase workflow; decisions: faults auto-clear after 1 s of healthy data (arming already disarmed and needs a switch re-toggle); thresholds below are engineering estimates, to be checked with the wiggle test.

@@ -4,7 +4,7 @@
 
 ## Current State
 - **Phase**: Firmware Architecture Setup & Sensor Integration
-- **Working Components**: Module base class, EventService (Pub/Sub), logging (`core/Log.h`), Teleplot telemetry (921600 baud), gyro calibration at boot, Complementary Filter attitude estimator (time-constant based), BMI270 IMU module (I2C, verified on hardware), WebSocket RC input module (builds; not yet tested on hardware).
+- **Working Components**: Module base class, EventService (Pub/Sub), logging (`core/Log.h`), Teleplot telemetry (921600 baud, verified on hardware), gyro calibration at boot, Complementary Filter attitude estimator (time-constant based), BMI270 IMU module (I2C, verified on hardware), WebSocket RC input module + web UI (arming verified end to end on hardware).
 - **Hardware**: Fully mapped in `.agents/rules/hardware_map.md` (ground truth) with diagram `docs/wiring.jpg`. `src/config/pins.h` matches it.
 - **Current Blockers**: None.
 - **Open Decisions**: IMU mounting alignment (decided at end of build, gates arming), ESC protocol (DShot300 recommended), propeller size, ADC pins for VBAT/CURR (must be G32–G39), GPIO for BMI270 INT pin, motor spin directions.
@@ -13,12 +13,26 @@
   - `Bmi270Module` polls in `loop()` instead of using the INT pin.
   - `EscModule` is a stub and has no constructor passing a name to `Module`.
   - `send_P` deprecation warning in `WebSocketRcProvider.h`.
-  - BMI270 can get stuck (CHIP_ID reads 0x20 instead of 0x24, init returns -3) and an ESP32 reset does not clear it, only a power cycle does. Bus recovery + retry now implemented (untested on hardware); if it can't clear the stuck state, the sensor's power must be switchable.
+  - BMI270 can get stuck (CHIP_ID reads 0x20 instead of 0x24, init returns -3) and an ESP32 reset does not clear it, only a power cycle does. **Confirmed again on 2026-11-05** after several uploads in a row: init failed until USB was unplugged. Bus recovery + re-init cannot clear it (the sensor keeps power; pulling its 3V3 wire does not help either, it stays back-powered through SDA/SCL), so before flight the sensor's power must be switchable with SDA/SCL driven low during the off time.
+  - Init failure log does not say why ("no response or wrong chip ID"); logging the CHIP_ID read would tell a stuck sensor (0x20) from a wiring fault.
+  - **After assembly** (with the End-of-Build Checklist): tune the gyro calibration limits (`GYRO_CAL_MAX_SPREAD_DPS` etc.) and `ATTITUDE_FILTER_TAU_S` from the drone at rest on the ground, motors off. Bench data is not usable: the breadboard hangs on its cables and sways (several deg/s, correlated on two axes).
   - `Module.h` includes `Arduino.h` (every module touches Arduino); fix with the Stage 2 platform layer.
   - `test_basic` is an empty test file.
 
 ## Session Log
 *Newest first. Prepend each new session entry directly below this line.*
+
+### [2026-11-05] - First Board Session: Telemetry, IMU Test, Wiggle Test
+- **Confirmed on hardware**: firmware boots, all modules set up, WiFi AP at 192.168.4.1. Teleplot telemetry works at 921600 baud: ~50 frames/s, `tlmDrop` 0 (`Serial.availableForWrite()` reports the full 1 KB TX buffer on this core). `test_bmi270` (with calibration) and `test_blink` PASSED.
+- **BMI270 stuck state reproduced**: `test_bmi270` failed with "unhealthy after setup" after several uploads; unplugging USB fixed it. See Known Issues.
+- **Wiggle test found loose power cables**: they caused the IMU problems seen at first (gyro calibration restarting dozens of times per second). Fixed on the bench; on the drone this wiring must be soldered, not jumpers.
+- **Gyro calibration works** (`gyroCal:1`), but the bench setup is not still: the breadboard hangs at an angle on its cables (roll ≈ −25°, pitch ≈ −48°) and sways; gx/gz swing ±3–5 deg/s, correlated. Attitude matches the accelerometer (|a| ≈ 1.02 g, pitch −asin(0.76) ≈ −49°, roll atan2(−0.29, 0.61) ≈ −25°) and the FLU signs are right. Calibration limit tuning moved to after assembly.
+- A gyro probe sketch showed WiFi has no effect on gyro noise.
+- **Health/recovery test**:
+  - Pull SDA: PASS. `READ_ERRORS` fault, arming blocked (`SENSOR_FAULT`), recovery retried every ~1 s, re-initialized and cleared after replug, estimator logged the gap and reset; no reboot.
+  - Pull sensor 3V3: fault detected (`ZERO_DATA`) but recovery **never succeeds** after replug. The module's LED stayed on with 3V3 removed: the sensor is back-powered through SDA/SCL (ESP32 pull-ups → module pull-ups / ESD diodes), so it never gets a clean power-on reset and stays stuck. Only a USB power cycle clears it. In flight a sensor power dip would kill the IMU until the battery is unplugged.
+  - Proposed fix (needs Phase 1 review, hardware change): sensor powered from a switchable source (e.g. a GPIO, BMI270 ~1 mA); recovery drives SDA/SCL low, cuts power ~100 ms (LED must go dark), restores power, re-inits. Plus soldered wiring and decoupling at the sensor.
+- **Arming end to end through the web UI: PASS** (alignment set to verified locally only, board propped flat, props off, no ESC driven). Link up → ready to arm; ARM → ARMED; AUTO_DISARM after 5 s; re-arm needs the switch OFF first; SWITCH_OFF; THROTTLE_NOT_LOW and NOT_LEVEL refuse arming; CRASH and SENSOR_FAULT disarm; RC loss keeps it armed then RC_LOSS_TIMEOUT after ~20 s; no rejected RC packets. The static RC queue and the strict WebSocket parser work with the real web UI.
 
 ### [2026-11-04] - Logging, Rule Fixes, Filter Timing, Gyro Calibration, Telemetry
 - Built without the board. 3-phase workflow; one plan for 5 items, one commit each.

@@ -3,6 +3,7 @@
 #define ARDUINO_H
 
 #include "WString.h"
+#include "MockClock.h"
 
 #define LOW 0
 #define HIGH 1
@@ -10,10 +11,9 @@
 #define INPUT 0
 #define LED_BUILTIN 2
 
-// Controllable clock for tests: set g_mockMillis to simulate time
-inline unsigned long g_mockMillis = 0;
+// Controllable clock for tests (shared with core/Clock.h): set g_mockMillis/g_mockMicros
 inline unsigned long millis() { return g_mockMillis; }
-inline unsigned long micros() { return 0; }
+inline unsigned long micros() { return g_mockMicros; }
 inline void delay(unsigned long) {}
 inline void pinMode(int, int) {}
 inline void digitalWrite(int, int) {}

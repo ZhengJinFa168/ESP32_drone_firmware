@@ -2,7 +2,6 @@
 #include "EscConfig.h"
 #include "config/pins.h"
 #include "core/eventService/EventService.h"
-#include <Arduino.h>
 
 void EscModule::setup() {
     // Configure PWM channels for each motor

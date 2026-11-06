@@ -2,6 +2,7 @@
 #include <cstdint>
 #include "core/Module.h"
 #include "core/Log.h"
+#include "core/Clock.h"
 #include "config/TelemetryConfig.h"
 #include "TelemetryFormatter.h"
 
@@ -19,7 +20,7 @@ private:
     uint32_t _lastFrameMs = 0;
     uint32_t _oversizeFrames = 0;
 
-    static uint32_t nowMs() { return static_cast<uint32_t>(millis()); }
+    static uint32_t nowMs() { return clockMs(); }
 
     static TelemetryModule* self(void* ctx) { return static_cast<TelemetryModule*>(ctx); }
 

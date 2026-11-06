@@ -1,23 +1,24 @@
 #pragma once
-#include <Arduino.h>
+#include <cstdint>
 #include "core/Module.h"
+#include "core/Clock.h"
 
 class HeartbeatModule : public Module {
 private:
-    unsigned long lastBeat;
-    int intervalMs;
+    uint32_t lastBeat;
+    uint32_t intervalMs;
 
 public:
-    explicit HeartbeatModule(int interval = 500)
+    explicit HeartbeatModule(uint32_t interval = 500)
         : Module("HEARTBEAT"), lastBeat(0), intervalMs(interval) {}
 
     void setup() override {
-        lastBeat = millis();
+        lastBeat = clockMs();
     }
 
     void loop() override {
-        unsigned long now = millis();
-        if (now - lastBeat >= static_cast<unsigned long>(intervalMs)) {
+        const uint32_t now = clockMs();
+        if (now - lastBeat >= intervalMs) {
             lastBeat = now;
             publish(EventType::HEARTBEAT);
         }

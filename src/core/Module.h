@@ -1,7 +1,6 @@
 #ifndef MODULE_H
 #define MODULE_H
 
-#include <Arduino.h>
 #include "eventService/EventService.h"
 #include "Log.h"
 

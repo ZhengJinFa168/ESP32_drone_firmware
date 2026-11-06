@@ -2,6 +2,7 @@
 #include <cstdint>
 #include "core/Module.h"
 #include "core/Log.h"
+#include "core/Clock.h"
 #include "config/SensorConfig.h"
 #include "ArmingLogic.h"
 
@@ -15,7 +16,7 @@ private:
     ArmingStatusData _lastStatus{};
     bool _statusPublished = false;
 
-    static uint32_t nowMs() { return static_cast<uint32_t>(millis()); }
+    static uint32_t nowMs() { return clockMs(); }
 
     static void onRcInput(void* ctx, const void* data) {
         if (!data) return;

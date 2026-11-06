@@ -1,6 +1,7 @@
 #pragma once
 #include "core/Module.h"
 #include "core/Log.h"
+#include "core/Clock.h"
 #include "RcValidation.h"
 
 // --- CONFIGURATION ---
@@ -58,7 +59,7 @@ public:
     void loop() override {
         if (!isEnabled()) return;
 
-        const unsigned long now = millis();
+        const unsigned long now = clockMs();
         RcInputData rcData;
 
         if (provider.getRcData(rcData)) {

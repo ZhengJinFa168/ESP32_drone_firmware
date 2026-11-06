@@ -25,6 +25,7 @@ enum class EventType : uint8_t {
     ARMING_STATUS,      // Arming state, blockers or RC link changed (ArmingStatusData)
     MODE_CHANGED,       // Flight mode changed
     HEARTBEAT,          // Periodic liveness signal
+    LOOP_STATS,         // Main loop timing over the last window (LoopStatsData), published by App
 
     _COUNT              // Must be last — used to size arrays
 };
@@ -52,6 +53,14 @@ struct RcInputData {
 
 struct MotorCommandData {
     float motors[4];  // 0.0 - 1.0 per motor
+};
+
+// Main loop timing over one window (CoreConfig::LOOP_STATS_WINDOW_MS)
+struct LoopStatsData {
+    uint32_t rateHz;     // Loop passes per second
+    uint32_t maxRunUs;   // Longest pass (all modules once)
+    uint32_t maxGapUs;   // Longest time between the starts of two passes
+    uint32_t overruns;   // Passes longer than the loop period (deadline missed)
 };
 
 struct ModeChangeData {

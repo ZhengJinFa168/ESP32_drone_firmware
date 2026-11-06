@@ -10,6 +10,15 @@
 using ActiveAttitudeFilter = ComplementaryFilter;
 
 // ============================================
+// FLIGHT LOOP TIMING
+// ============================================
+// One loop pass per IMU sample (BMI270 at 400 Hz). A pass longer than this period is
+// an overrun: the next sample is late and the control loop timing degrades.
+// Stage 2 pass criteria (phone connected and sending, telemetry on):
+//   loopHz 400 +/- 2, loopGapMaxUs <= 3000, loopOverruns 0, no IMU NO_DATA_READY fault.
+constexpr uint32_t FLIGHT_LOOP_PERIOD_US = 2500;
+
+// ============================================
 // ATTITUDE ESTIMATION
 // ============================================
 // Complementary filter time constant: the accelerometer corrects roll/pitch over

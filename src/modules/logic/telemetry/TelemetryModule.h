@@ -5,20 +5,21 @@
 #include "core/Clock.h"
 #include "config/TelemetryConfig.h"
 #include "TelemetryFormatter.h"
+#include "TelemetrySender.h"
 
 // Streams live values to Teleplot.
-// Subscribes: IMU_RAW, ATTITUDE_UPDATED, ARMING_STATUS, SENSOR_FAULT, GYRO_CALIBRATION, RC_INPUT
-// Callbacks only store the latest value; loop() formats and sends one frame per
-// period. SAFETY: output never blocks the flight loop — a frame that does not fit
-// in the serial TX buffer is dropped and counted (>tlmDrop).
+// Subscribes: IMU_RAW, ATTITUDE_UPDATED, ARMING_STATUS, SENSOR_FAULT, GYRO_CALIBRATION,
+// RC_INPUT, LOOP_STATS
+// Collector: callbacks only store the latest values in a snapshot; once per period the
+// snapshot goes to TelemetrySender, which formats and writes it (never blocks).
+// The sender can later move to a core-0 task (see TelemetrySender.h).
 class TelemetryModule : public Module {
 private:
     static constexpr uint32_t PERIOD_MS = 1000u / TELEMETRY_RATE_HZ;
 
     TelemetrySnapshot _snap;
-    char _frame[TELEMETRY_FRAME_MAX];
+    TelemetrySender _sender;
     uint32_t _lastFrameMs = 0;
-    uint32_t _oversizeFrames = 0;
 
     static uint32_t nowMs() { return clockMs(); }
 
@@ -59,6 +60,12 @@ private:
         self(ctx)->_snap.haveRc = true;
     }
 
+    static void onLoopStats(void* ctx, const void* data) {
+        if (!data) return;
+        self(ctx)->_snap.loop = *static_cast<const LoopStatsData*>(data);
+        self(ctx)->_snap.haveLoop = true;
+    }
+
 public:
     TelemetryModule() : Module("TELEMETRY") {}
 
@@ -70,6 +77,7 @@ public:
         subscribe(EventType::SENSOR_FAULT, onSensorFault);
         subscribe(EventType::GYRO_CALIBRATION, onGyroCalibration);
         subscribe(EventType::RC_INPUT, onRcInput);
+        subscribe(EventType::LOOP_STATS, onLoopStats);
         _lastFrameMs = nowMs();
     }
 
@@ -78,20 +86,9 @@ public:
         const uint32_t now = nowMs();
         if (now - _lastFrameMs < PERIOD_MS) return;
         _lastFrameMs = now;
-
-        size_t len = 0;
-        if (!formatTelemetry(_frame, sizeof(_frame), _snap, TELEMETRY_GROUPS, len)) {
-            // Configuration error (too many values for TELEMETRY_FRAME_MAX): loud, once
-            if (_oversizeFrames++ == 0) {
-                LOG_E("TELEMETRY", "frame larger than TELEMETRY_FRAME_MAX (%u B), telemetry not sent",
-                      static_cast<unsigned>(TELEMETRY_FRAME_MAX));
-            }
-            return;
-        }
-        if (len == 0) return;  // Nothing received yet
-        if (!logTryWrite(_frame, len)) _snap.droppedFrames++;
+        _sender.send(_snap);
     }
 
-    uint32_t droppedFrames() const { return _snap.droppedFrames; }
-    uint32_t oversizeFrames() const { return _oversizeFrames; }
+    uint32_t droppedFrames() const { return _sender.droppedFrames(); }
+    uint32_t oversizeFrames() const { return _sender.oversizeFrames(); }
 };

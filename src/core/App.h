@@ -2,6 +2,9 @@
 #include "Module.h"
 #include "CoreConfig.h"
 #include "Log.h"
+#include "Clock.h"
+#include "LoopStats.h"
+#include "eventService/EventService.h"
 
 class App {
 public:
@@ -10,9 +13,12 @@ public:
 private:
     Module* modules[MAX_MODULES];
     int moduleCount;
+    LoopStats _loopStats;
 
 public:
-    App() : moduleCount(0) {}
+    // loopPeriodUs: deadline for one pass (0 = no overrun check), see FLIGHT_LOOP_PERIOD_US
+    explicit App(uint32_t loopPeriodUs = 0)
+        : moduleCount(0), _loopStats(loopPeriodUs, CoreConfig::LOOP_STATS_WINDOW_MS) {}
 
     // Returns false (and logs an error) if the module list is full or module is null.
     // SAFETY: a module that silently fails to register (e.g. arming) would never run;
@@ -42,11 +48,25 @@ public:
     }
 
     // Runs every enabled module once. Never blocks: the caller decides how to yield.
+    // Every pass is timed; once per LOOP_STATS_WINDOW_MS the stats are published as
+    // LOOP_STATS (from the loop's own task, like every other event).
     void loop() {
+        const uint32_t startUs = clockUs();
         for (int i = 0; i < moduleCount; i++) {
             if (modules[i]->isEnabled()) {
                 modules[i]->loop();
             }
+        }
+        const uint32_t endUs = clockUs();
+
+        LoopStatsData stats;
+        if (_loopStats.record(startUs, endUs, clockMs(), stats)) {
+            // Loud but bounded: at most one line per window
+            if (stats.overruns > 0) {
+                LOG_W("APP", "loop overruns: %lu passes missed the deadline (longest %lu us)",
+                      static_cast<unsigned long>(stats.overruns), static_cast<unsigned long>(stats.maxRunUs));
+            }
+            EventService::instance().publish(EventType::LOOP_STATS, &stats);
         }
     }
 

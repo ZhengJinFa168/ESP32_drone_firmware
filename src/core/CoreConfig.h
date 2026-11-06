@@ -1,5 +1,6 @@
 #pragma once
 #include <cstddef>
+#include <cstdint>
 
 #ifndef CORE_MAX_MODULES
 #define CORE_MAX_MODULES 15
@@ -12,5 +13,6 @@
 namespace CoreConfig {
     constexpr int MAX_MODULES = CORE_MAX_MODULES;
     constexpr int MAX_LISTENERS_PER_EVENT = CORE_MAX_LISTENERS_PER_EVENT;
+    constexpr uint32_t LOOP_STATS_WINDOW_MS = 1000;  // App publishes LOOP_STATS this often
 }
 

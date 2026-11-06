@@ -19,11 +19,12 @@ namespace TelemetryGroup {
     constexpr uint8_t IMU      = 1 << 1;  // gyro (deg/s, bias removed), accel (g), body frame
     constexpr uint8_t STATUS   = 1 << 2;  // armed, blockers, rcLink, imuFault, gyroCal, tlmDrop
     constexpr uint8_t RC       = 1 << 3;  // throttle, sticks, arm switch
-    constexpr uint8_t ALL      = ATTITUDE | IMU | STATUS | RC;
+    constexpr uint8_t LOOP     = 1 << 4;  // loop rate, longest pass/gap, overruns (LOOP_STATS, once per second)
+    constexpr uint8_t ALL      = ATTITUDE | IMU | STATUS | RC | LOOP;
 }
 constexpr uint8_t TELEMETRY_GROUPS = TelemetryGroup::ALL;
 
-// Largest frame (bytes). All groups need ~270; a frame that does not fit is not sent
+// Largest frame (bytes). All groups: 359 B worst case (all values at their widest); a frame that does not fit is not sent
 // (loud error) rather than sent truncated.
 constexpr size_t TELEMETRY_FRAME_MAX = 384;
 

@@ -85,7 +85,33 @@ void test_default_frame_fits_buffer() {
     worst.imu = {-15.999f, -15.999f, -15.999f, -1999.99f, -1999.99f, -1999.99f, 0};
     worst.status.blockers = 0xFFFF;
     worst.droppedFrames = 4294967295u;
+    worst.haveLoop = true;
+    worst.loop = {4294967295u, 4294967295u, 4294967295u, 4294967295u};
     TEST_ASSERT_TRUE(formatTelemetry(buf, sizeof(buf), worst, TELEMETRY_GROUPS, len));
+}
+
+void test_loop_group_lines() {
+    char buf[TELEMETRY_FRAME_MAX];
+    size_t len = 0;
+    TelemetrySnapshot s;
+    s.haveLoop = true;
+    s.loop = {400, 310, 2560, 2};
+    TEST_ASSERT_TRUE(formatTelemetry(buf, sizeof(buf), s, TelemetryGroup::LOOP, len));
+    TEST_ASSERT_EQUAL_STRING(">loopHz:400\n>loopRunMaxUs:310\n>loopGapMaxUs:2560\n>loopOverruns:2\n", buf);
+}
+
+// --- Sender ---
+
+void test_sender_counts_drops_and_reports_them() {
+    TelemetrySender sender;
+    TelemetrySnapshot s;                                  // Status lines are always sent
+    g_mockLog.txFree = 0;
+    sender.send(s);
+    sender.send(s);
+    TEST_ASSERT_EQUAL_UINT32(2, sender.droppedFrames());
+    g_mockLog.txFree = MockLog::TX_CAPTURE_SIZE;
+    sender.send(s);
+    TEST_ASSERT_NOT_NULL(std::strstr(g_mockLog.tx, ">tlmDrop:2\n"));
 }
 
 // --- Module ---
@@ -140,6 +166,16 @@ void test_module_tracks_imu_fault_only() {
     TEST_ASSERT_NOT_NULL(std::strstr(g_mockLog.tx, ">imuFault:1\n>gyroCal:1\n"));
 }
 
+void test_module_forwards_loop_stats() {
+    TelemetryModule tlm;
+    tlm.setup();
+    LoopStatsData stats{399, 420, 2600, 0};
+    EventService::instance().publish(EventType::LOOP_STATS, &stats);
+    g_mockMillis = 1000;
+    tlm.loop();
+    TEST_ASSERT_NOT_NULL(std::strstr(g_mockLog.tx, ">loopHz:399\n>loopRunMaxUs:420\n>loopGapMaxUs:2600\n"));
+}
+
 void test_subscribe_failure_is_logged() {
     // Fill IMU_RAW's listener slots, then the module's subscription must fail loudly
     for (int i = 0; i < EventService::MAX_LISTENERS_PER_EVENT; i++) {
@@ -157,9 +193,12 @@ int main() {
     RUN_TEST(test_values_never_received_are_not_sent);
     RUN_TEST(test_frame_too_big_is_refused_not_truncated);
     RUN_TEST(test_default_frame_fits_buffer);
+    RUN_TEST(test_loop_group_lines);
+    RUN_TEST(test_sender_counts_drops_and_reports_them);
     RUN_TEST(test_module_sends_at_configured_rate);
     RUN_TEST(test_module_drops_and_counts_when_buffer_full);
     RUN_TEST(test_module_tracks_imu_fault_only);
+    RUN_TEST(test_module_forwards_loop_stats);
     RUN_TEST(test_subscribe_failure_is_logged);
     return UNITY_END();
 }

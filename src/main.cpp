@@ -33,7 +33,7 @@ static Module* const MODULES[] = {
 // ============================================
 // APPLICATION
 // ============================================
-static App drone;
+static App drone(FLIGHT_LOOP_PERIOD_US);
 
 // SAFETY: a missing module (e.g. arming) means the drone runs without its checks.
 // Halt loudly instead of flying with a partial system; motors are never started.

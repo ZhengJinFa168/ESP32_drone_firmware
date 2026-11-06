@@ -26,6 +26,8 @@ struct TelemetrySnapshot {
     ArmingStatusData status{};
     bool haveRc = false;
     RcInputData rc{};
+    bool haveLoop = false;
+    LoopStatsData loop{};
     bool imuFault = false;
     bool gyroCalibrated = false;
     uint32_t droppedFrames = 0;   // Frames not sent because the TX buffer was full
@@ -80,6 +82,12 @@ inline bool formatTelemetry(char* buf, size_t cap, const TelemetrySnapshot& s, u
     if ((groups & TelemetryGroup::RC) && s.haveRc) {
         w.line(">throttle:%.2f\n>rcRoll:%.2f\n>rcPitch:%.2f\n>rcYaw:%.2f\n>armSwitch:%u\n",
                s.rc.throttle, s.rc.roll, s.rc.pitch, s.rc.yaw, static_cast<unsigned>(s.rc.aux[ARM_AUX_CHANNEL]));
+    }
+
+    if ((groups & TelemetryGroup::LOOP) && s.haveLoop) {
+        w.line(">loopHz:%lu\n>loopRunMaxUs:%lu\n>loopGapMaxUs:%lu\n>loopOverruns:%lu\n",
+               static_cast<unsigned long>(s.loop.rateHz), static_cast<unsigned long>(s.loop.maxRunUs),
+               static_cast<unsigned long>(s.loop.maxGapUs), static_cast<unsigned long>(s.loop.overruns));
     }
 
     if (w.overflow) return false;

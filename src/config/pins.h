@@ -5,6 +5,12 @@
 // I2C – BMI270 IMU
 #define PIN_SDA     21
 #define PIN_SCL     22
+// BMI270 module power (switched): the module's 3.3V pin is fed from this GPIO so the
+// driver can power-cycle a stuck sensor. While it is off, SDA/SCL must be driven LOW
+// and INT must have no pull-up, or the sensor is back-powered through them.
+#define PIN_IMU_POWER 4
+// BMI270 INT (data-ready). Wired; used by the Stage 2 flight task. Input, never a pull-up.
+#define PIN_IMU_INT 32
 
 // ESC signal outputs – Betaflight motor layout (Quad X, viewed from above)
 #define PIN_MOTOR_1 13  // Rear-right

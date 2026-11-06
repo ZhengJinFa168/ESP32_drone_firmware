@@ -5,11 +5,11 @@
  * BMI270 IMU Module
  * 
  * Hardware Connection (I2C):
- * - 3.3V : ESP32 3.3V
+ * - 3.3V : ESP32 GPIO 4 (PIN_IMU_POWER, switched power, see "Power cycle" below)
  * - GND  : ESP32 GND
  * - SCL  : ESP32 GPIO 22 (PIN_SCL)
  * - SDA  : ESP32 GPIO 21 (PIN_SDA)
- * - INT  : Not currently used (can be used for hardware interrupts)
+ * - INT  : ESP32 GPIO 32 (PIN_IMU_INT), wired but not used yet (Stage 2 flight task)
  * - GND  : ESP32 GND
  * 
  * Library Information:
@@ -26,10 +26,19 @@
  * - Data from an unhealthy sensor is never published as IMU_RAW.
  * - Every IMU_REG_CHECK_MS the power-control register is read: 0 means the sensor
  *   reset (e.g. a power glitch) and lost its configuration.
- * - While faulty, recovery (I2C bus reset + re-init) is attempted at most every
- *   IMU_RECOVERY_RETRY_MS. Re-init uploads 8 KB of config and blocks the loop for a
- *   few hundred ms; acceptable because a fault has already disarmed the drone.
- * NOTE: register check, bus recovery and re-init are not yet tested on hardware.
+ * - While faulty, recovery (power cycle + re-init) is attempted at most every
+ *   IMU_RECOVERY_RETRY_MS. Re-init uploads 8 KB of config and blocks the loop for
+ *   ~300 ms (measured 296 ms); acceptable because a fault has already disarmed the
+ *   drone. Stage 2 must move this out of the flight task.
+ *
+ * Power cycle (see ImuPowerSequencer):
+ * - The module is powered from PIN_IMU_POWER. Every boot and every recovery attempt
+ *   switches it off for IMU_POWER_OFF_MS, then on, then initializes it. A BMI270 that
+ *   was partially powered during a dip comes back stuck (CHIP_ID 0x20) and only a real
+ *   power-off clears it (bench-verified 2026-11-06).
+ * - While off, SDA/SCL are driven LOW and INT has no pull-up: a high line back-powers
+ *   the sensor through its pins and it never gets a clean power-on reset.
+ * - The waits are non-blocking (millis()); only the init itself blocks.
  *
  * Gyro calibration (see GyroCalibrator):
  * - At boot, healthy body-frame samples go to the calibrator until it has averaged
@@ -45,6 +54,7 @@
 #include "config/pins.h"
 #include "modules/sensors/bmi_imu/ImuHealthMonitor.h"
 #include "modules/sensors/bmi_imu/GyroCalibrator.h"
+#include "modules/sensors/bmi_imu/ImuPowerSequencer.h"
 
 class Bmi270Module : public Module {
 private:
@@ -69,10 +79,11 @@ private:
     // Health
     ImuHealthMonitor _health;
     bool _initialized = false;
-    // A fault found in setup() is published on the first loop(): modules set up
-    // after this one (e.g. arming) have not subscribed yet during setup().
-    ImuHealthMonitor::Change _bootChange = ImuHealthMonitor::Change::NONE;
-    bool _bootReported = false;
+
+    // Power cycle (boot and recovery). The first init runs in loop(), so its result is
+    // published from loop() too (never publish from setup()).
+    ImuPowerSequencer _power;
+    static constexpr uint8_t EXPECTED_CHIP_ID = 0x24;  // BMI270; 0x20 = stuck after a power dip
 
     // Gyro calibration
     GyroCalibrator _gyroCal;
@@ -103,49 +114,82 @@ private:
         return _wire.read();
     }
 
-    // Free a sensor that holds SDA low mid-transfer: clock SCL up to 9 times, then
-    // send a STOP. The microsecond waits only happen during recovery.
-    void recoverBus() {
-        _wire.end();
-        pinMode(PIN_SDA, INPUT_PULLUP);
-        pinMode(PIN_SCL, OUTPUT_OPEN_DRAIN);
-        digitalWrite(PIN_SCL, HIGH);
-        for (int i = 0; i < 9 && digitalRead(PIN_SDA) == LOW; i++) {
-            digitalWrite(PIN_SCL, LOW);
-            delayMicroseconds(5);
-            digitalWrite(PIN_SCL, HIGH);
-            delayMicroseconds(5);
-        }
-        // STOP condition: SDA rises while SCL is high
-        pinMode(PIN_SDA, OUTPUT_OPEN_DRAIN);
-        digitalWrite(PIN_SDA, LOW);
-        delayMicroseconds(5);
-        digitalWrite(PIN_SCL, HIGH);
-        delayMicroseconds(5);
-        digitalWrite(PIN_SDA, HIGH);
-        delayMicroseconds(5);
-
-        beginBus();
-    }
-
     void beginBus() {
         _wire.begin(PIN_SDA, PIN_SCL);
         _wire.setClock(400000); // 400kHz fast mode
     }
 
-    void attemptRecovery(uint32_t now) {
-        _health.onRecoveryAttempt(now);
-        LOG_W("BMI270", "recovery attempt (I2C bus reset + re-init, loop blocked briefly)...");
-        recoverBus();
+    // Sensor off. SDA/SCL LOW and INT without pull-up: a high line would back-power the
+    // sensor through its pins and it would come back stuck.
+    void cutPower() {
+        _wire.end();
+        pinMode(PIN_SDA, OUTPUT);
+        digitalWrite(PIN_SDA, LOW);
+        pinMode(PIN_SCL, OUTPUT);
+        digitalWrite(PIN_SCL, LOW);
+        pinMode(PIN_IMU_INT, INPUT);
+        digitalWrite(PIN_IMU_POWER, LOW);
+    }
+
+    // Sensor on. The lines are released first; I2C starts after the settle time.
+    void restorePower() {
+        pinMode(PIN_SDA, INPUT);
+        pinMode(PIN_SCL, INPUT);
+        digitalWrite(PIN_IMU_POWER, HIGH);
+    }
+
+    void startPowerCycle(uint32_t now) {
+        if (_power.start(now) != ImuPowerSequencer::Action::CUT_POWER) return;
+        _initialized = false;  // No reads until the sensor is initialized again
+        cutPower();
+    }
+
+    // Runs the power cycle. Returns true while it is in progress (sensor must not be read).
+    bool runPowerCycle(uint32_t now) {
+        if (!_power.busy()) return false;
+        switch (_power.update(now)) {
+            case ImuPowerSequencer::Action::RESTORE_POWER: restorePower(); break;
+            case ImuPowerSequencer::Action::INIT_SENSOR:   initAfterPowerUp(); break;
+            default: break;
+        }
+        return true;
+    }
+
+    // Blocks ~300 ms (8 KB config upload).
+    void initAfterPowerUp() {
+        beginBus();
         _initialized = initSensor();
         if (_initialized) {
-            LOG_I("BMI270", "re-initialized, fault clears after healthy data");
+            if (_health.isFaulty()) {
+                LOG_I("BMI270", "re-initialized after power cycle, fault clears after healthy data");
+            } else {
+                LOG_I("BMI270", "initialized");
+            }
         } else {
-            LOG_E("BMI270", "recovery failed, will retry");
+            logInitFailure();
             report(_health.onInitResult(false));
         }
         _lastReadTimeUs = micros();
         _lastRegCheckMs = nowMs();
+    }
+
+    // Says why init failed: no answer (wiring/power) or a wrong chip ID (0x20 = stuck)
+    void logInitFailure() {
+        const int chipId = readRegister(BMI2_CHIP_ID_ADDR);
+        if (chipId < 0) {
+            LOG_E("BMI270", "init failed: no answer on I2C (wiring or power?), will retry");
+        } else if (chipId != EXPECTED_CHIP_ID) {
+            LOG_E("BMI270", "init failed: chip ID 0x%02X (expected 0x%02X, 0x20 = stuck), will retry",
+                  chipId, EXPECTED_CHIP_ID);
+        } else {
+            LOG_E("BMI270", "init failed: chip ID OK but configuration failed, will retry");
+        }
+    }
+
+    void attemptRecovery(uint32_t now) {
+        _health.onRecoveryAttempt(now);
+        LOG_W("BMI270", "recovery attempt: power cycle + re-init (loop blocked ~300 ms)...");
+        startPowerCycle(now);
     }
 
     // SAFETY: every health change is published, so arming can block or disarm.
@@ -207,36 +251,28 @@ public:
         : Module("BMI270_IMU"), _imu(driver()), _readIntervalUs(readIntervalUs), _i2cAddress(i2cAddress), _wire(wire) {}
 
     void setup() override {
-        beginBus();
-        LOG_I("BMI270", "initializing...");
+        // INT never gets a pull-up (back-feed); the power pin starts LOW (sensor off)
+        pinMode(PIN_IMU_INT, INPUT);
+        pinMode(PIN_IMU_POWER, OUTPUT);
 
-        _initialized = initSensor();
-        if (_initialized) {
-            LOG_I("BMI270", "initialized");
-        } else {
-            // Stay enabled: the module keeps retrying and reports the fault loudly
-            LOG_E("BMI270", "init failed (no response or wrong chip ID), will retry");
-            _health.onRecoveryAttempt(nowMs());
-            _bootChange = _health.onInitResult(false);  // Published on the first loop()
-        }
+        // Clean start: power-cycle the sensor even after a plain ESP32 reset (the sensor
+        // may be stuck from before). Init runs in loop() once the cycle completes; a
+        // failure there is reported loudly and retried every IMU_RECOVERY_RETRY_MS.
+        LOG_I("BMI270", "power-cycling the sensor, init follows in loop()...");
+        const uint32_t now = nowMs();
+        _health.onRecoveryAttempt(now);  // The first retry waits IMU_RECOVERY_RETRY_MS
+        startPowerCycle(now);
 
         // SAFETY: an unverified mounting alignment can flip the drone at takeoff.
         if (!IMU_ALIGNMENT_VERIFIED) {
             LOG_W("BMI270", "IMU alignment NOT verified (SensorConfig.h), arming will be blocked");
         }
         LOG_I("BMI270", "gyro calibration starts with the first healthy samples: keep the drone still");
-
-        _lastReadTimeUs = micros();
-        _lastRegCheckMs = nowMs();
     }
 
     void loop() override {
-        if (!_bootReported) {
-            _bootReported = true;
-            report(_bootChange);
-        }
-
         const uint32_t now = nowMs();
+        if (runPowerCycle(now)) return;
         if (_health.shouldAttemptRecovery(now)) {
             attemptRecovery(now);
             return;
@@ -282,4 +318,6 @@ public:
 
     bool isHealthy() const { return !_health.isFaulty(); }
     bool isGyroCalibrated() const { return _gyroCal.isCalibrated(); }
+    bool isInitialized() const { return _initialized; }
+    uint32_t powerCycles() const { return _power.cycles(); }
 };

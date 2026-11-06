@@ -23,6 +23,16 @@ void tearDown(void) {
     // clean stuff up here
 }
 
+// Runs the app until the sensor is initialized, at most 1 s. Returns isInitialized().
+static bool runUntilInitialized(App& app, Bmi270Module& imu) {
+    unsigned long start = millis();
+    while (millis() - start < 1000 && !imu.isInitialized()) {
+        app.loop();
+        delay(1);
+    }
+    return imu.isInitialized();
+}
+
 void test_bmi270_initialization_and_publish() {
     App testApp;
     Bmi270Module imu;
@@ -33,9 +43,15 @@ void test_bmi270_initialization_and_publish() {
     // Subscribe to IMU_RAW events
     EventService::instance().subscribe(EventType::IMU_RAW, onImuData, nullptr);
 
+    // setup() only starts a power cycle (sensor powered from PIN_IMU_POWER); the
+    // init runs in loop() about IMU_POWER_OFF_MS + IMU_POWER_ON_SETTLE_MS later.
+    TEST_ASSERT_FALSE_MESSAGE(imu.isInitialized(), "Sensor must not be initialized before the power cycle");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, imu.powerCycles(), "setup() must start exactly one power cycle");
+
     // This is a hardware test: the sensor must be present. A failed init is a
     // real failure, not a skip (a skip previously hid an uninitialized-driver bug).
-    TEST_ASSERT_TRUE_MESSAGE(imu.isHealthy(), "BMI270 unhealthy after setup (init failed or sensor fault)");
+    TEST_ASSERT_TRUE_MESSAGE(runUntilInitialized(testApp, imu), "BMI270 not initialized 1 s after boot (power, wiring or stuck)");
+    TEST_ASSERT_TRUE_MESSAGE(imu.isHealthy(), "BMI270 unhealthy after init (sensor fault)");
 
     // The board must lie still: gyro calibration (~1 s) runs before any IMU_RAW is
     // published. Allow 3 s for calibration (a restart or two) plus some samples.
@@ -54,6 +70,20 @@ void test_bmi270_initialization_and_publish() {
         lastData.gx, lastData.gy, lastData.gz);
 }
 
+// Every boot power-cycles the sensor: repeated boots (like repeated uploads/resets,
+// which used to leave the sensor stuck with CHIP_ID 0x20) must always initialize.
+void test_repeated_boot_power_cycles() {
+    for (int i = 0; i < 5; i++) {
+        EventService::instance().reset();
+        App app;
+        Bmi270Module imu;
+        app.registerModule(&imu);
+        app.setup();
+        TEST_ASSERT_TRUE_MESSAGE(runUntilInitialized(app, imu), "BMI270 did not initialize after a power cycle");
+        TEST_ASSERT_TRUE(imu.isHealthy());
+    }
+}
+
 void setup() {
     Serial.begin(115200);
     delay(2000);  // Wait for serial to stabilize
@@ -61,6 +91,7 @@ void setup() {
     UNITY_BEGIN();
 
     RUN_TEST(test_bmi270_initialization_and_publish);
+    RUN_TEST(test_repeated_boot_power_cycles);
 
     UNITY_END();
 }

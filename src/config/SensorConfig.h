@@ -28,6 +28,19 @@ constexpr uint32_t IMU_RECOVERY_RETRY_MS = 1000;        // Minimum time between 
 constexpr uint32_t IMU_REG_CHECK_MS = 100;              // How often the driver checks the power-control register
 
 // ============================================
+// IMU POWER CYCLE (module powered from PIN_IMU_POWER)
+// ============================================
+// Every boot and every recovery attempt power-cycles the sensor: a sensor stuck after
+// a power dip (CHIP_ID 0x20) is cleared only by a real power-off.
+// Bench-measured 2026-11-06: 1 ms off already gives a real power-on reset; 50 ms is margin.
+constexpr uint32_t IMU_POWER_OFF_MS = 50;         // Power pin LOW (SDA/SCL LOW) for this long
+constexpr uint32_t IMU_POWER_ON_SETTLE_MS = 10;   // Wait after power-on before talking to the sensor
+
+static_assert(IMU_POWER_OFF_MS > 0 && IMU_POWER_ON_SETTLE_MS > 0, "IMU power cycle times must be > 0");
+static_assert(IMU_POWER_OFF_MS + IMU_POWER_ON_SETTLE_MS < IMU_RECOVERY_RETRY_MS,
+              "A power cycle must finish before the next recovery attempt is due");
+
+// ============================================
 // GYRO CALIBRATION (at boot, drone must be still)
 // ============================================
 // Engineering estimates [TO TUNE on hardware]: log the gyro with the board still

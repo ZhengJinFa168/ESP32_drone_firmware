@@ -4,23 +4,32 @@
 
 ## Current State
 - **Phase**: Firmware Architecture Setup & Sensor Integration
-- **Working Components**: Module base class, EventService (Pub/Sub), logging (`core/Log.h`), Teleplot telemetry (921600 baud, verified on hardware), gyro calibration at boot, Complementary Filter attitude estimator (time-constant based), BMI270 IMU module (I2C, verified on hardware), WebSocket RC input module + web UI (arming verified end to end on hardware).
+- **Working Components**: Module base class, EventService (Pub/Sub), logging (`core/Log.h`), Teleplot telemetry (921600 baud, verified on hardware), gyro calibration at boot, Complementary Filter attitude estimator (time-constant based), BMI270 IMU module (I2C, switched power on G4 with power-cycle recovery, verified on hardware), WebSocket RC input module + web UI (arming verified end to end on hardware).
 - **Hardware**: Fully mapped in `.agents/rules/hardware_map.md` (ground truth) with diagram `docs/wiring.jpg`. `src/config/pins.h` matches it.
 - **Current Blockers**: None.
-- **Open Decisions**: IMU mounting alignment (decided at end of build, gates arming), ESC protocol (DShot300 recommended), propeller size, ADC pins for VBAT/CURR (must be G32–G39), GPIO for BMI270 INT pin, motor spin directions.
+- **Open Decisions**: IMU mounting alignment (decided at end of build, gates arming), ESC protocol (DShot300 recommended), propeller size, ADC pins for VBAT/CURR (must be ADC1: G33–G39, G32 is now IMU INT), motor spin directions.
 - **Known Issues / Next Up**:
   - The main loop yields with `vTaskDelay(1)` (1 ms) in `main.cpp`; plan is an IMU-interrupt-driven flight task pinned to core 1.
   - `Bmi270Module` polls in `loop()` instead of using the INT pin.
   - `EscModule` is a stub and has no constructor passing a name to `Module`.
   - `send_P` deprecation warning in `WebSocketRcProvider.h`.
-  - BMI270 can get stuck (CHIP_ID reads 0x20 instead of 0x24, init returns -3) and an ESP32 reset does not clear it, only a power cycle does. **Confirmed again on 2026-11-05** after several uploads in a row: init failed until USB was unplugged. Bus recovery + re-init cannot clear it (the sensor keeps power; pulling its 3V3 wire does not help either, it stays back-powered through SDA/SCL), so before flight the sensor's power must be switchable with SDA/SCL driven low during the off time.
-  - Init failure log does not say why ("no response or wrong chip ID"); logging the CHIP_ID read would tell a stuck sensor (0x20) from a wiring fault.
+  - BMI270 sensor init (8 KB config upload) blocks the loop: 296 ms normally, up to ~1.2 s when the sensor does not answer (I2C timeouts). Acceptable only while disarmed; Stage 2 must move it out of the flight task.
+  - The ESP32 core logs its own `[E][Wire.cpp:...]` lines on failed I2C reads (noise during IMU faults); can be silenced with `CORE_DEBUG_LEVEL`.
   - **After assembly** (with the End-of-Build Checklist): tune the gyro calibration limits (`GYRO_CAL_MAX_SPREAD_DPS` etc.) and `ATTITUDE_FILTER_TAU_S` from the drone at rest on the ground, motors off. Bench data is not usable: the breadboard hangs on its cables and sways (several deg/s, correlated on two axes).
   - `Module.h` includes `Arduino.h` (every module touches Arduino); fix with the Stage 2 platform layer.
   - `test_basic` is an empty test file.
 
 ## Session Log
 *Newest first. Prepend each new session entry directly below this line.*
+
+### [2026-11-06] - Switchable IMU Power and Power-Cycle Recovery
+- 3-phase workflow. **Wiring change**: BMI270 module 3.3V pin moved from 3V3 to **G4** (`PIN_IMU_POWER`); BMI270 INT wired to **G32** (`PIN_IMU_INT`, not used yet, Stage 2). `hardware_map.md` and `pins.h` updated.
+- **Bench probe (throwaway sketch)**: a clean power cycle (G4 LOW, SDA/SCL LOW) gives a real power-on reset every time (PWR_CTRL = 0x00 before init), even with 1 ms off. With G4 floating and SDA/SCL pulled up (= a pulled wire) the sensor came back **stuck (CHIP_ID 0x20, init −3)** 1 time in 3, and a clean 100 ms cycle cleared it. Confirms the back-feed explanation. Init time: 296 ms.
+- **`ImuPowerSequencer.h`** (pure, non-blocking): power off `IMU_POWER_OFF_MS` (50) → on → settle `IMU_POWER_ON_SETTLE_MS` (10) → init. A second start while busy is ignored; settle counts from the actual power-on; wrap-safe.
+- **`Bmi270Module`**: every boot and every recovery attempt power-cycles the sensor (replaces the I2C bus-clock recovery). While off: SDA/SCL driven LOW, INT input without pull-up. Init runs in `loop()`, so the boot `_bootChange` workaround is gone. Init failures now log the cause: no answer on I2C / chip ID 0x20 (stuck) / config failed.
+- **Verified on hardware**: boot calibrates with 0 restarts (board fixed); pulling the sensor's power wire twice → fault (`RESET_DETECTED`, `ZERO_DATA`), power cycles every ~1 s, the second pull showed `chip ID 0x20 (stuck)`, and both times re-init + `SENSOR OK` after replug with **no USB unplug** (failed before this change). `test_bmi270` now also checks 5 boot power cycles in a row.
+- **Tests**: new `test_imu_power` (6). Native 125/125; hardware tests PASSED.
+- **Still open**: flight-safety fix for power dips is the wiring (soldered, short, 10 µF + 100 nF at the sensor); a fault in flight still disarms (Stage 4 decision).
 
 ### [2026-11-05] - First Board Session: Telemetry, IMU Test, Wiggle Test
 - **Confirmed on hardware**: firmware boots, all modules set up, WiFi AP at 192.168.4.1. Teleplot telemetry works at 921600 baud: ~50 frames/s, `tlmDrop` 0 (`Serial.availableForWrite()` reports the full 1 KB TX buffer on this core). `test_bmi270` (with calibration) and `test_blink` PASSED.

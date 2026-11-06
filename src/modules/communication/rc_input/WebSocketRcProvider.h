@@ -7,6 +7,7 @@
 #include <atomic>
 #include "core/eventService/EventType.h"
 #include "core/Log.h"
+#include "core/Clock.h"
 #include "config/ArmingConfig.h"
 #include "WebUI.h"
 #include "WebSocketRcPacket.h"
@@ -17,17 +18,24 @@ private:
     AsyncWebSocket ws;
 
     // Length-1 "mailbox" queue holding the latest RC packet.
-    // onWsEvent runs on the async_tcp task, getRcData on loopTask, so the
+    // onWsEvent runs on the async_tcp task (core 0), getRcData on the flight task, so the
     // handoff must be thread-safe; the queue does the locking and copying.
     // Statically allocated: the queue's control block and storage are members.
     StaticQueue_t _rcQueueControl;
     uint8_t _rcQueueStorage[sizeof(RcInputData)];
     QueueHandle_t _rcQueue = nullptr;
 
-    // Malformed packets (written on async_tcp, read on loopTask)
+    // Malformed packets (written on async_tcp, read on the flight task)
     std::atomic<uint32_t> _malformedPackets{0};
 
+    // Core the WebSocket handler runs on (async_tcp; expected 0), -1 until the first event
+    std::atomic<int> _handlerCore{-1};
+    bool _handlerCoreLogged = false;
+
+    uint32_t _lastCleanupMs = 0;
+
     void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len) {
+        _handlerCore.store(xPortGetCoreID());  // Logged from the flight task (no logging here)
         if (type == WS_EVT_DATA) {
             AwsFrameInfo *info = (AwsFrameInfo*)arg;
             if (info->final && info->index == 0 && info->len == len && info->opcode == WS_TEXT) {
@@ -75,8 +83,21 @@ public:
     }
 
     bool getRcData(RcInputData& outData) {
-        // ws.cleanupClients() should be called periodically to free up memory from disconnected clients
-        ws.cleanupClients(); 
+        const int core = _handlerCore.load();
+        if (core >= 0 && !_handlerCoreLogged) {
+            _handlerCoreLogged = true;
+            LOG_I("WS_RC", "WebSocket handler runs on core %d", core);
+        }
+
+        // Frees disconnected clients. At most once per second: it frees heap memory,
+        // which does not belong in a 400 Hz loop.
+        // KNOWN RACE (deferred, NOTES.md): cleanupClients() walks the client list without
+        // the lock async_tcp uses, from another core. Fix before flight.
+        const uint32_t now = clockMs();
+        if (now - _lastCleanupMs >= 1000) {
+            _lastCleanupMs = now;
+            ws.cleanupClients();
+        }
 
         if (!_rcQueue) return false;
 

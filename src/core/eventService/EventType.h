@@ -79,6 +79,7 @@ enum class SensorFaultReason : uint8_t {
     FROZEN_DATA,     // Identical samples for too long (data stopped updating)
     READ_ERRORS,     // Consecutive bus read failures
     RESET_DETECTED,  // Sensor registers show it lost its configuration
+    NO_DATA_READY,   // Data-ready interrupt stopped arriving (INT wire, sensor stopped)
 };
 
 struct SensorFaultData {

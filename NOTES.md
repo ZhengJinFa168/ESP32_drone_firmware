@@ -4,19 +4,21 @@
 
 ## Current State
 - **Phase**: Firmware Architecture Setup & Sensor Integration
-- **Working Components**: Module base class, EventService (Pub/Sub), logging (`core/Log.h`), Teleplot telemetry (921600 baud, verified on hardware), gyro calibration at boot, Complementary Filter attitude estimator (time-constant based), BMI270 IMU module (I2C, switched power on G4 with power-cycle recovery, verified on hardware), WebSocket RC input module + web UI (arming verified end to end on hardware).
+- **Working Components**: flight task on core 1 driven by the BMI270 data-ready interrupt (400 Hz, verified on hardware), Module base class, EventService (Pub/Sub), logging (`core/Log.h`), Teleplot telemetry (921600 baud, verified on hardware), gyro calibration at boot, Complementary Filter attitude estimator (time-constant based), BMI270 IMU module (I2C, switched power on G4 with power-cycle recovery, verified on hardware), WebSocket RC input module + web UI (arming verified end to end on hardware).
 - **Hardware**: Fully mapped in `.agents/rules/hardware_map.md` (ground truth) with diagram `docs/wiring.jpg`. `src/config/pins.h` matches it.
 - **Current Blockers**: None.
 - **Open Decisions**: IMU mounting alignment (decided at end of build, gates arming), ESC protocol (DShot300 recommended), propeller size, ADC pins for VBAT/CURR (must be ADC1: G33–G39, G32 is now IMU INT), motor spin directions.
 - **Known Issues / Next Up**:
-  - The main loop yields with `vTaskDelay(1)` (1 ms) in `main.cpp`; plan is an IMU-interrupt-driven flight task pinned to core 1.
-  - `Bmi270Module` polls in `loop()` instead of using the INT pin.
+  - **Before flight** (deferred from Stage 2):
+    - Move the BMI270 init (296 ms, up to ~1.2 s) out of the flight task.
+    - Queued logger: log lines are written from the flight task and block when the 1 KB TX buffer is full.
+    - Web UI / WebSocket: `cleanupClients()` (now 1 Hz) walks the client list without the AsyncTCP lock, from the flight task on core 1 while AsyncTCP runs on core 0 (data race); accepts only one client properly; hardcoded password; throttle drops to 0 on release; touch-only sticks.
+  - Rare loop overruns (a few µs): a pass that both formats a telemetry frame (~1.2 ms) and checks the IMU power register (extra I2C read) takes ~2.5 ms. No sample is lost (gap stays ≤ 2.54 ms). Fix: send telemetry from core 0 (`TelemetrySender` is built to move), or spread the register check.
   - `EscModule` is a stub and has no constructor passing a name to `Module`.
   - `send_P` deprecation warning in `WebSocketRcProvider.h`.
-  - BMI270 sensor init (8 KB config upload) blocks the loop: 296 ms normally, up to ~1.2 s when the sensor does not answer (I2C timeouts). Acceptable only while disarmed; Stage 2 must move it out of the flight task.
+  - BMI270 sensor init (8 KB config upload) blocks the flight task: 296 ms normally, up to ~1.2 s when the sensor does not answer (I2C timeouts). Acceptable only while disarmed (see "Before flight").
   - The ESP32 core logs its own `[E][Wire.cpp:...]` lines on failed I2C reads (noise during IMU faults); can be silenced with `CORE_DEBUG_LEVEL`.
   - **After assembly** (with the End-of-Build Checklist): tune the gyro calibration limits (`GYRO_CAL_MAX_SPREAD_DPS` etc.) and `ATTITUDE_FILTER_TAU_S` from the drone at rest on the ground, motors off. Bench data is not usable: the breadboard hangs on its cables and sways (several deg/s, correlated on two axes).
-  - `Module.h` includes `Arduino.h` (every module touches Arduino); fix with the Stage 2 platform layer.
   - `test_basic` is an empty test file.
 
 ## Session Log

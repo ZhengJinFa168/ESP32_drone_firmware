@@ -10,7 +10,7 @@
  * - GND  : ESP32 GND
  * - SCL  : ESP32 GPIO 22 (PIN_SCL)
  * - SDA  : ESP32 GPIO 21 (PIN_SDA)
- * - INT  : ESP32 GPIO 32 (PIN_IMU_INT), wired but not used yet (Stage 2 flight task)
+ * - INT  : ESP32 GPIO 32 (PIN_IMU_INT), data-ready interrupt (see "Data ready" below)
  * - GND  : ESP32 GND
  * 
  * Library Information:
@@ -30,7 +30,18 @@
  * - While faulty, recovery (power cycle + re-init) is attempted at most every
  *   IMU_RECOVERY_RETRY_MS. Re-init uploads 8 KB of config and blocks the loop for
  *   ~300 ms (measured 296 ms); acceptable because a fault has already disarmed the
- *   drone. Stage 2 must move this out of the flight task.
+ *   drone. Must move out of the flight task before flight (NOTES.md).
+ *
+ * Data ready (INT, see Esp32DataReady):
+ * - INT1 pulses on every new sample (400 Hz). The edge wakes the flight task and the
+ *   sensor is read ONLY then: one read per sample, never a stale or doubled one.
+ * - SAFETY: no edge for IMU_DRDY_MISSING_MS while initialized = NO_DATA_READY fault
+ *   (INT wire off, sensor stopped). Recovery power-cycles the sensor as for any fault.
+ * - Edges while the sensor is off or not initialized are discarded (spurious edges
+ *   during a power cycle are harmless).
+ * - Re-sync: after an init or a failed read, INT may already be high with no new edge
+ *   coming; the next pass then reads if the line is high, so a dropped edge or one bus
+ *   error never stops the data.
  *
  * Power cycle (see ImuPowerSequencer):
  * - The module is powered from PIN_IMU_POWER. Every boot and every recovery attempt
@@ -39,7 +50,7 @@
  *   power-off clears it (bench-verified 2026-11-06).
  * - While off, SDA/SCL are driven LOW and INT has no pull-up: a high line back-powers
  *   the sensor through its pins and it never gets a clean power-on reset.
- * - The waits are non-blocking (millis()); only the init itself blocks.
+ * - The waits are non-blocking (clockMs()); only the init itself blocks.
  *
  * Gyro calibration (see GyroCalibrator):
  * - At boot, healthy body-frame samples go to the calibrator until it has averaged
@@ -51,6 +62,8 @@
 #include <SparkFun_BMI270_Arduino_Library.h>
 #include <Wire.h>
 #include "core/Log.h"
+#include "core/Clock.h"
+#include "platform/esp32/Esp32DataReady.h"
 #include "config/SensorConfig.h"
 #include "config/pins.h"
 #include "modules/sensors/bmi_imu/ImuHealthMonitor.h"
@@ -70,8 +83,11 @@ private:
     }
 
     BMI270& _imu;
-    unsigned long _lastReadTimeUs = 0;
-    unsigned long _readIntervalUs = 2500; // 400 Hz default read rate
+
+    // Data-ready interrupt (INT1 -> PIN_IMU_INT)
+    Esp32DataReady _dataReady;
+    uint32_t _lastDataReadyMs = 0;  // Last edge (or init): NO_DATA_READY timeout
+    bool _readIfHigh = false;       // Re-sync: read if INT is already high (no edge will come)
 
     // Hardware settings
     uint8_t _i2cAddress;
@@ -92,7 +108,7 @@ private:
     uint32_t _calRestartsLogged = 0;
     uint32_t _lastRegCheckMs = 0;
 
-    static uint32_t nowMs() { return static_cast<uint32_t>(millis()); }
+    static uint32_t nowMs() { return clockMs(); }
 
     bool initSensor() {
         if (_imu.beginI2C(_i2cAddress, _wire) != BMI2_OK) return false;
@@ -103,6 +119,20 @@ private:
 
         // Disable advanced power save to get continuous high-speed data
         _imu.disableAdvancedPowerSave();
+
+        // Data-ready on INT1, non-latched (as in the SparkFun examples): the line follows
+        // the data-ready status. If it stays high after a failed read, loop() reads again.
+        // Push-pull, active high: the ESP32 pin has no pull-up (back-feed rule).
+        // A failure here is an init failure: without INT the sensor is never read.
+        bmi2_int_pin_config intConfig{};
+        intConfig.pin_type = BMI2_INT1;
+        intConfig.int_latch = BMI2_INT_NON_LATCH;
+        intConfig.pin_cfg[0].lvl = BMI2_INT_ACTIVE_HIGH;
+        intConfig.pin_cfg[0].od = BMI2_INT_PUSH_PULL;
+        intConfig.pin_cfg[0].output_en = BMI2_INT_OUTPUT_ENABLE;
+        intConfig.pin_cfg[0].input_en = BMI2_INT_INPUT_DISABLE;
+        if (_imu.setInterruptPinConfig(intConfig) != BMI2_OK) return false;
+        if (_imu.mapInterruptToPin(BMI2_DRDY_INT, BMI2_INT1) != BMI2_OK) return false;
         return true;
     }
 
@@ -170,8 +200,20 @@ private:
             logInitFailure();
             report(_health.onInitResult(false));
         }
-        _lastReadTimeUs = micros();
+        // Timers start after the (blocking) init, so it does not count as missing INT
+        _dataReady.consume();  // Drop edges from before/while initializing
+        // If the first sample became ready during the init, INT may already be high and
+        // its edge was just dropped: read it on the next pass instead of waiting.
+        _readIfHigh = true;
+        _lastDataReadyMs = nowMs();
         _lastRegCheckMs = nowMs();
+    }
+
+    // SAFETY: the sensor is read only on INT, so no INT = no data. Loud fault, not a
+    // silent fallback to polling: a missing INT wire must be found on the bench.
+    void checkDataReadyMissing(uint32_t now) {
+        if (now - _lastDataReadyMs <= IMU_DRDY_MISSING_MS) return;
+        report(_health.onDataReadyMissing());
     }
 
     // Says why init failed: no answer (wiring/power) or a wrong chip ID (0x20 = stuck)
@@ -248,13 +290,15 @@ private:
     }
 
 public:
-    explicit Bmi270Module(uint8_t i2cAddress = BMI2_I2C_PRIM_ADDR, TwoWire& wire = Wire, unsigned long readIntervalUs = 2500)
-        : Module("BMI270_IMU"), _imu(driver()), _readIntervalUs(readIntervalUs), _i2cAddress(i2cAddress), _wire(wire) {}
+    explicit Bmi270Module(uint8_t i2cAddress = BMI2_I2C_PRIM_ADDR, TwoWire& wire = Wire)
+        : Module("BMI270_IMU"), _imu(driver()), _i2cAddress(i2cAddress), _wire(wire) {}
 
     void setup() override {
         // INT never gets a pull-up (back-feed); the power pin starts LOW (sensor off)
         pinMode(PIN_IMU_INT, INPUT);
         pinMode(PIN_IMU_POWER, OUTPUT);
+        // Called from setup() on core 1, so the interrupt is allocated on the flight core
+        _dataReady.begin(PIN_IMU_INT);
 
         // Clean start: power-cycle the sensor even after a plain ESP32 reset (the sensor
         // may be stuck from before). Init runs in loop() once the cycle completes; a
@@ -273,6 +317,8 @@ public:
 
     void loop() override {
         const uint32_t now = nowMs();
+        // Always consume: edges while the sensor is off or not initialized are discarded
+        const bool edge = _dataReady.consume();
         if (runPowerCycle(now)) return;
         if (_health.shouldAttemptRecovery(now)) {
             attemptRecovery(now);
@@ -280,13 +326,20 @@ public:
         }
         if (!_initialized) return;
 
-        unsigned long nowUs = micros();
-        if (nowUs - _lastReadTimeUs < _readIntervalUs) return;
-        _lastReadTimeUs = nowUs;
+        // Read only when the sensor says a sample is ready (see "Data ready")
+        const bool retry = _readIfHigh && digitalRead(PIN_IMU_INT) == HIGH;
+        if (!edge && !retry) {
+            checkDataReadyMissing(now);
+            return;
+        }
+        _lastDataReadyMs = now;
+        _readIfHigh = false;
+        const uint32_t sampleUs = clockUs();
 
         checkPowerRegister(now);
 
         if (_imu.getSensorData() != BMI2_OK) {
+            _readIfHigh = true;
             report(_health.onReadError());
             return;
         }
@@ -311,7 +364,7 @@ public:
         }
         _gyroCal.apply(gyro);
 
-        ImuData data{acc[0], acc[1], acc[2], gyro[0], gyro[1], gyro[2], static_cast<uint32_t>(nowUs)};
+        ImuData data{acc[0], acc[1], acc[2], gyro[0], gyro[1], gyro[2], sampleUs};
 
         // Publish IMU_RAW event (body frame)
         publish(EventType::IMU_RAW, &data);
@@ -321,4 +374,10 @@ public:
     bool isGyroCalibrated() const { return _gyroCal.isCalibrated(); }
     bool isInitialized() const { return _initialized; }
     uint32_t powerCycles() const { return _power.cycles(); }
+
+    // Data-ready edges since boot (tests: ~400 per second)
+    uint32_t dataReadyCount() const { return _dataReady.count(); }
+
+    // Flight task to wake on each data-ready edge. Until set, edges are only flagged.
+    void setDataReadyTask(TaskHandle_t task) { _dataReady.setTask(task); }
 };

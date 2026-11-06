@@ -26,6 +26,11 @@ constexpr uint16_t IMU_HEALTH_READ_ERROR_SAMPLES = 10;  // Consecutive read fail
 constexpr uint16_t IMU_HEALTH_RECOVERY_SAMPLES = 400;   // Healthy samples before the fault clears — ~1 s
 constexpr uint32_t IMU_RECOVERY_RETRY_MS = 1000;        // Minimum time between re-initialization attempts
 constexpr uint32_t IMU_REG_CHECK_MS = 100;              // How often the driver checks the power-control register
+// The sensor is read only on its data-ready interrupt (INT, 400 Hz). No interrupt for
+// this long (10 samples) = no data: NO_DATA_READY fault, recovery by power cycle.
+// SAFETY: missing IMU data means the drone cannot fly level; today the fault disarms,
+// the in-flight reaction (land) is decided in Stage 4.
+constexpr uint32_t IMU_DRDY_MISSING_MS = 25;
 
 // ============================================
 // IMU POWER CYCLE (module powered from PIN_IMU_POWER)

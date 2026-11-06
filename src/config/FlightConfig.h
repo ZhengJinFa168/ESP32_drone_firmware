@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include "config/ArmingConfig.h"
+#include "config/SensorConfig.h"
 
 // Include the available filters
 #include "modules/logic/attitude_estimator/ComplementaryFilter.h"
@@ -17,6 +18,25 @@ using ActiveAttitudeFilter = ComplementaryFilter;
 // Stage 2 pass criteria (phone connected and sending, telemetry on):
 //   loopHz 400 +/- 2, loopGapMaxUs <= 3000, loopOverruns 0, no IMU NO_DATA_READY fault.
 constexpr uint32_t FLIGHT_LOOP_PERIOD_US = 2500;
+
+// ============================================
+// FLIGHT TASK (src/main.cpp)
+// ============================================
+// The whole App (every module, the event bus) runs in one FreeRTOS task on core 1,
+// woken by the IMU data-ready interrupt. Core 0 runs WiFi and AsyncTCP.
+// Priority 20: above every Arduino/WiFi task on core 1 (loopTask is 1), below the
+// ESP-IDF system tasks (esp_timer 22, ipc 24).
+constexpr int FLIGHT_TASK_CORE = 1;
+constexpr uint32_t FLIGHT_TASK_PRIORITY = 20;
+constexpr uint32_t FLIGHT_TASK_STACK_BYTES = 8192;
+// Without an interrupt the task still runs every FLIGHT_TASK_WAIT_MS, so the modules
+// keep running (arming, RC, telemetry) and the IMU driver can detect the missing INT.
+constexpr uint32_t FLIGHT_TASK_WAIT_MS = 8;
+
+static_assert(FLIGHT_TASK_WAIT_MS * 1000 > FLIGHT_LOOP_PERIOD_US,
+              "The timeout must be longer than one sample, or it competes with the interrupt");
+static_assert(FLIGHT_TASK_WAIT_MS < IMU_DRDY_MISSING_MS,
+              "The task must run at least once within IMU_DRDY_MISSING_MS to detect a missing INT");
 
 // ============================================
 // ATTITUDE ESTIMATION

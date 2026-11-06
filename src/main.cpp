@@ -3,6 +3,7 @@
 #include "core/App.h"
 #include "core/Log.h"
 #include "config/FlightConfig.h"
+#include "platform/esp32/Esp32Task.h"
 #include "modules/actuators/blink/BlinkModule.h"
 #include "modules/logic/heartbeat/HeartbeatModule.h"
 #include "modules/logic/attitude_estimator/AttitudeEstimatorModule.h"
@@ -44,17 +45,43 @@ static App drone(FLIGHT_LOOP_PERIOD_US);
     }
 }
 
+// ============================================
+// FLIGHT TASK (core 1)
+// ============================================
+// SAFETY / threading: the event bus is synchronous and single-threaded, so the whole
+// App runs in this one task (see architecture.md). It is woken by the BMI270
+// data-ready interrupt (400 Hz): one pass per IMU sample, with the lowest latency
+// from sample to motor output. Arduino's loopTask is not used (priority 1, would be
+// preempted by anything else on core 1).
+// Without an interrupt it still runs every FLIGHT_TASK_WAIT_MS, so arming, RC loss and
+// the IMU's NO_DATA_READY check keep working while the sensor is off or missing.
+static Esp32PinnedTask<FLIGHT_TASK_STACK_BYTES> flightTask;
+
+[[noreturn]] static void flightLoop(void*) {
+    for (;;) {
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(FLIGHT_TASK_WAIT_MS));
+        drone.loop();
+    }
+}
+
 void setup() {
     logInit();
     for (Module* module : MODULES) {
         if (!drone.registerModule(module)) haltWithError("module registration failed (see above)");
     }
+    // Runs here (loopTask, core 1): the IMU's interrupt is allocated on core 1 too
     drone.setup();
-    LOG_I("MAIN", "System running");
+
+    // The flight task has a higher priority than this one: it starts running at once
+    if (!flightTask.start("flight", flightLoop, nullptr, FLIGHT_TASK_PRIORITY, FLIGHT_TASK_CORE)) {
+        haltWithError("flight task could not be created");
+    }
+    imu.setDataReadyTask(flightTask.handle());
+    LOG_I("MAIN", "System running: flight task on core %d, priority %lu",
+          FLIGHT_TASK_CORE, static_cast<unsigned long>(FLIGHT_TASK_PRIORITY));
 }
 
 void loop() {
-    drone.loop();
-    // Yield one tick (1 ms) so lower-priority tasks (idle, watchdog) can run
-    vTaskDelay(1);
+    // Everything runs in the flight task; loopTask is not needed
+    vTaskDelete(nullptr);
 }

@@ -60,6 +60,11 @@ public:
     // The driver found the sensor's configuration registers reset (e.g. after a power glitch)
     Change onResetDetected() { return raise(SensorFaultReason::RESET_DETECTED); }
 
+    // The driver saw no data-ready interrupt for IMU_DRDY_MISSING_MS. The sensor is read
+    // only on that interrupt, so no data is arriving: raised at once (the count is
+    // already in the timeout), and recovery is attempted as for any fault.
+    Change onDataReadyMissing() { return raise(SensorFaultReason::NO_DATA_READY); }
+
     bool shouldAttemptRecovery(uint32_t nowMs) const {
         if (!_faulty || _healthyRun > 0) return false;
         return !_attempted || (nowMs - _lastAttemptMs) >= IMU_RECOVERY_RETRY_MS;
@@ -131,6 +136,7 @@ inline const char* sensorFaultReasonName(SensorFaultReason reason) {
         case SensorFaultReason::FROZEN_DATA:    return "FROZEN_DATA";
         case SensorFaultReason::READ_ERRORS:    return "READ_ERRORS";
         case SensorFaultReason::RESET_DETECTED: return "RESET_DETECTED";
+        case SensorFaultReason::NO_DATA_READY:  return "NO_DATA_READY";
         default:                                return "UNKNOWN";
     }
 }

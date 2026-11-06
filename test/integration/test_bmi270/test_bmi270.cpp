@@ -70,6 +70,30 @@ void test_bmi270_initialization_and_publish() {
         lastData.gx, lastData.gy, lastData.gz);
 }
 
+// The sensor is read only on its data-ready interrupt (INT1 -> PIN_IMU_INT): edges
+// must arrive at the 400 Hz output data rate. Polled here (no flight task): the edge
+// flag is set by the ISR either way.
+void test_data_ready_interrupt_rate() {
+    App app;
+    Bmi270Module imu;
+    app.registerModule(&imu);
+    app.setup();
+    TEST_ASSERT_TRUE_MESSAGE(runUntilInitialized(app, imu), "BMI270 not initialized");
+
+    const uint32_t startCount = imu.dataReadyCount();
+    const unsigned long start = millis();
+    while (millis() - start < 1000) {
+        app.loop();
+        delay(1);
+    }
+    const uint32_t edges = imu.dataReadyCount() - startCount;
+    Serial.printf("data-ready edges in 1 s: %lu\n", static_cast<unsigned long>(edges));
+
+    // BMI270 ODR tolerance is about +/-1%; allow a few more for the 1 s window edges
+    TEST_ASSERT_UINT32_WITHIN_MESSAGE(8, 400, edges, "INT rate is not 400 Hz (INT wire? INT config?)");
+    TEST_ASSERT_TRUE_MESSAGE(imu.isHealthy(), "NO_DATA_READY or other fault while INT was arriving");
+}
+
 // Every boot power-cycles the sensor: repeated boots (like repeated uploads/resets,
 // which used to leave the sensor stuck with CHIP_ID 0x20) must always initialize.
 void test_repeated_boot_power_cycles() {
@@ -91,6 +115,7 @@ void setup() {
     UNITY_BEGIN();
 
     RUN_TEST(test_bmi270_initialization_and_publish);
+    RUN_TEST(test_data_ready_interrupt_rate);
     RUN_TEST(test_repeated_boot_power_cycles);
 
     UNITY_END();

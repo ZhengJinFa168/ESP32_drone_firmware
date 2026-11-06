@@ -131,6 +131,19 @@ void test_init_failure_and_reset_raise_immediately() {
     TEST_ASSERT_EQUAL(static_cast<int>(SensorFaultReason::RESET_DETECTED), static_cast<int>(b.reason()));
 }
 
+void test_missing_data_ready_raises_immediately() {
+    // The driver already waited IMU_DRDY_MISSING_MS: no further count here
+    ImuHealthMonitor m;
+    TEST_ASSERT_EQUAL(static_cast<int>(Change::FAULT_RAISED), static_cast<int>(m.onDataReadyMissing()));
+    TEST_ASSERT_EQUAL(static_cast<int>(SensorFaultReason::NO_DATA_READY), static_cast<int>(m.reason()));
+    TEST_ASSERT_EQUAL_STRING("NO_DATA_READY", sensorFaultReasonName(m.reason()));
+    TEST_ASSERT_TRUE(m.shouldAttemptRecovery(0));  // Recovered by power cycle like any fault
+
+    // Repeated while still missing: no new fault, and recovery samples restart
+    TEST_ASSERT_EQUAL(static_cast<int>(Change::NONE), static_cast<int>(m.onDataReadyMissing()));
+    TEST_ASSERT_EQUAL_UINT32(1, m.faultCount());
+}
+
 void test_fault_keeps_original_reason() {
     ImuHealthMonitor m;
     m.onResetDetected();
@@ -215,6 +228,7 @@ int main() {
     RUN_TEST(test_frozen_data_raises_fault);
     RUN_TEST(test_read_errors_raise_fault);
     RUN_TEST(test_init_failure_and_reset_raise_immediately);
+    RUN_TEST(test_missing_data_ready_raises_immediately);
     RUN_TEST(test_fault_keeps_original_reason);
 
     RUN_TEST(test_fault_clears_after_recovery_samples);

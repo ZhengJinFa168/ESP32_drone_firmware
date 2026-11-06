@@ -2,4 +2,5 @@
 .vscode/
 .DS_Store
 .agents/*
-!.agents/rules/
+# Agent instructions stay local (not on GitHub)
+CLAUDE.md

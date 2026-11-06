@@ -4,6 +4,7 @@
 #include "core/Log.h"
 #include "config/FlightConfig.h"
 #include "platform/esp32/Esp32Task.h"
+#include "platform/esp32/Esp32TelemetryOutput.h"
 #include "modules/actuators/blink/BlinkModule.h"
 #include "modules/logic/heartbeat/HeartbeatModule.h"
 #include "modules/logic/attitude_estimator/AttitudeEstimatorModule.h"
@@ -25,7 +26,7 @@ static Bmi270Module imu;
 static DroneAttitudeEstimator attitudeEstimator(ATTITUDE_FILTER_TAU_S);
 static RcInputModule rcInput;
 static ArmingModule arming;
-static TelemetryModule telemetry;
+static TelemetryModule<Esp32TelemetryOutput> telemetry;
 
 static Module* const MODULES[] = {
     &heartbeat, &blink, &imu, &attitudeEstimator, &rcInput, &arming, &telemetry,
@@ -66,6 +67,10 @@ static Esp32PinnedTask<FLIGHT_TASK_STACK_BYTES> flightTask;
 
 void setup() {
     logInit();
+    // From here on logging never blocks: lines go to the core-0 serial writer task.
+    // Before any module logs, so the boot burst is queued too. A failure is logged and
+    // logging stays direct (blocking), which is still safe on the ground.
+    logStartWriter();
     for (Module* module : MODULES) {
         if (!drone.registerModule(module)) haltWithError("module registration failed (see above)");
     }

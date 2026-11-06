@@ -11,14 +11,18 @@
 // Subscribes: IMU_RAW, ATTITUDE_UPDATED, ARMING_STATUS, SENSOR_FAULT, GYRO_CALIBRATION,
 // RC_INPUT, LOOP_STATS
 // Collector: callbacks only store the latest values in a snapshot; once per period the
-// snapshot goes to TelemetrySender, which formats and writes it (never blocks).
-// The sender can later move to a core-0 task (see TelemetrySender.h).
+// snapshot goes to the output, which formats and writes it (never blocks).
+// TOutput (compile time, no chip code here): begin(), send(const TelemetrySnapshot&),
+// droppedFrames(), oversizeFrames().
+// - Board: Esp32TelemetryOutput (formats on the core-0 serial writer task)
+// - Native tests: TelemetrySender (formats and writes in send())
+template <typename TOutput>
 class TelemetryModule : public Module {
 private:
     static constexpr uint32_t PERIOD_MS = 1000u / TELEMETRY_RATE_HZ;
 
     TelemetrySnapshot _snap;
-    TelemetrySender _sender;
+    TOutput _output;
     uint32_t _lastFrameMs = 0;
 
     static uint32_t nowMs() { return clockMs(); }
@@ -78,6 +82,7 @@ public:
         subscribe(EventType::GYRO_CALIBRATION, onGyroCalibration);
         subscribe(EventType::RC_INPUT, onRcInput);
         subscribe(EventType::LOOP_STATS, onLoopStats);
+        _output.begin();
         _lastFrameMs = nowMs();
     }
 
@@ -86,9 +91,10 @@ public:
         const uint32_t now = nowMs();
         if (now - _lastFrameMs < PERIOD_MS) return;
         _lastFrameMs = now;
-        _sender.send(_snap);
+        _output.send(_snap);
     }
 
-    uint32_t droppedFrames() const { return _sender.droppedFrames(); }
-    uint32_t oversizeFrames() const { return _sender.oversizeFrames(); }
+    uint32_t droppedFrames() const { return _output.droppedFrames(); }
+    uint32_t oversizeFrames() const { return _output.oversizeFrames(); }
+    const TOutput& output() const { return _output; }  // Tests
 };

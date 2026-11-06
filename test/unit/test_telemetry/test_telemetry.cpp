@@ -117,7 +117,7 @@ void test_sender_counts_drops_and_reports_them() {
 // --- Module ---
 
 void test_module_sends_at_configured_rate() {
-    TelemetryModule tlm;
+    TelemetryModule<TelemetrySender> tlm;
     tlm.setup();
     AttitudeData att{1.0f, 2.0f, 3.0f};
     EventService::instance().publish(EventType::ATTITUDE_UPDATED, &att);
@@ -132,7 +132,7 @@ void test_module_sends_at_configured_rate() {
 }
 
 void test_module_drops_and_counts_when_buffer_full() {
-    TelemetryModule tlm;
+    TelemetryModule<TelemetrySender> tlm;
     tlm.setup();
     const uint32_t period = 1000 / TELEMETRY_RATE_HZ;
 
@@ -149,7 +149,7 @@ void test_module_drops_and_counts_when_buffer_full() {
 }
 
 void test_module_tracks_imu_fault_only() {
-    TelemetryModule tlm;
+    TelemetryModule<TelemetrySender> tlm;
     tlm.setup();
     SensorFaultData baro{SensorId::BAROMETER, true, SensorFaultReason::READ_ERRORS};
     EventService::instance().publish(EventType::SENSOR_FAULT, &baro);
@@ -167,7 +167,7 @@ void test_module_tracks_imu_fault_only() {
 }
 
 void test_module_forwards_loop_stats() {
-    TelemetryModule tlm;
+    TelemetryModule<TelemetrySender> tlm;
     tlm.setup();
     LoopStatsData stats{399, 420, 2600, 0};
     EventService::instance().publish(EventType::LOOP_STATS, &stats);
@@ -176,12 +176,60 @@ void test_module_forwards_loop_stats() {
     TEST_ASSERT_NOT_NULL(std::strstr(g_mockLog.tx, ">loopHz:399\n>loopRunMaxUs:420\n>loopGapMaxUs:2600\n"));
 }
 
+// Stands in for the board output (Esp32TelemetryOutput): records what the module hands over
+struct FakeOutput {
+    int begins = 0;
+    int sends = 0;
+    TelemetrySnapshot last{};
+    uint32_t dropped = 0;
+    void begin() { begins++; }
+    void send(const TelemetrySnapshot& s) { sends++; last = s; }
+    void addDropped(uint32_t n) { dropped += n; }
+    uint32_t droppedFrames() const { return dropped; }
+    uint32_t oversizeFrames() const { return 0; }
+};
+
+void test_module_hands_latest_snapshot_to_output_once_per_period() {
+    TelemetryModule<FakeOutput> tlm;
+    tlm.setup();
+    const uint32_t period = 1000 / TELEMETRY_RATE_HZ;
+
+    AttitudeData a1{1.0f, 0.0f, 0.0f};
+    EventService::instance().publish(EventType::ATTITUDE_UPDATED, &a1);
+    AttitudeData a2{2.0f, 0.0f, 0.0f};
+    EventService::instance().publish(EventType::ATTITUDE_UPDATED, &a2);  // Newer value wins
+
+    for (uint32_t t = 0; t < period; t++) {
+        g_mockMillis = t;
+        tlm.loop();
+    }
+    TEST_ASSERT_EQUAL(0, tlm.droppedFrames());
+    g_mockMillis = period;
+    tlm.loop();
+    tlm.loop();  // Same period: no second frame
+    TEST_ASSERT_EQUAL_FLOAT(2.0f, tlm.output().last.attitude.roll);
+    TEST_ASSERT_TRUE(tlm.output().last.haveAttitude);
+    TEST_ASSERT_EQUAL(1, tlm.output().sends);
+    TEST_ASSERT_EQUAL(1, tlm.output().begins);
+    TEST_ASSERT_EQUAL(0, g_mockLog.txLen);  // The module itself never writes
+}
+
+void test_sender_add_dropped_shows_in_frame() {
+    TelemetrySender sender;
+    sender.addDropped(2);  // e.g. replaced in the board's mailbox
+    TelemetrySnapshot s;
+    s.haveStatus = true;
+    sender.send(s);
+    TEST_ASSERT_EQUAL_UINT32(2, sender.droppedFrames());
+    TEST_ASSERT_NOT_NULL(std::strstr(g_mockLog.tx, ">tlmDrop:2\n"));
+}
+
 void test_subscribe_failure_is_logged() {
     // Fill IMU_RAW's listener slots, then the module's subscription must fail loudly
     for (int i = 0; i < EventService::MAX_LISTENERS_PER_EVENT; i++) {
         EventService::instance().subscribe(EventType::IMU_RAW, [](void*, const void*) {}, nullptr);
     }
-    TelemetryModule tlm;
+    TelemetryModule<TelemetrySender> tlm;
     tlm.setup();
     TEST_ASSERT_TRUE(g_mockLog.contains("TELEMETRY: subscribe failed"));
 }
@@ -199,6 +247,8 @@ int main() {
     RUN_TEST(test_module_drops_and_counts_when_buffer_full);
     RUN_TEST(test_module_tracks_imu_fault_only);
     RUN_TEST(test_module_forwards_loop_stats);
+    RUN_TEST(test_module_hands_latest_snapshot_to_output_once_per_period);
+    RUN_TEST(test_sender_add_dropped_shows_in_frame);
     RUN_TEST(test_subscribe_failure_is_logged);
     return UNITY_END();
 }

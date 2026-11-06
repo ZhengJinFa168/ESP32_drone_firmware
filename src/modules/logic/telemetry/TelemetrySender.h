@@ -1,6 +1,7 @@
 #pragma once
 #include <cstddef>
 #include <cstdint>
+#include <atomic>
 #include "core/Log.h"
 #include "config/TelemetryConfig.h"
 #include "TelemetryFormatter.h"
@@ -12,15 +13,16 @@
 // that does not fit in the serial TX buffer is dropped and counted (>tlmDrop).
 //
 // Kept separate from TelemetryModule (which collects values from events in the flight
-// task) so it can be moved to another task, e.g. on core 0: hand it snapshot copies
-// through a one-slot mailbox (xQueueOverwrite, like WebSocketRcProvider) and call
-// send() only from that task. send() touches only its own members and logTryWrite()
-// (the UART driver locks per write). Never call it from two tasks.
+// task): on the board it runs in the core-0 serial writer task, fed through a one-slot
+// mailbox (platform/esp32/Esp32TelemetryOutput.h). In native tests it is the module's
+// output directly. Call send() from one task only; the counters are atomic, so they
+// can be read (and addDropped() called) from another.
 class TelemetrySender {
 public:
+    void begin() {}  // TOutput interface (TelemetryModule): nothing to start
     void send(const TelemetrySnapshot& snapshot) {
         TelemetrySnapshot s = snapshot;
-        s.droppedFrames = _droppedFrames;
+        s.droppedFrames = _droppedFrames.load();
 
         size_t len = 0;
         if (!formatTelemetry(_frame, sizeof(_frame), s, TELEMETRY_GROUPS, len)) {
@@ -35,11 +37,14 @@ public:
         if (!logTryWrite(_frame, len)) _droppedFrames++;
     }
 
-    uint32_t droppedFrames() const { return _droppedFrames; }
-    uint32_t oversizeFrames() const { return _oversizeFrames; }
+    // Frames lost before reaching send() (e.g. replaced in a mailbox): also in >tlmDrop
+    void addDropped(uint32_t frames) { _droppedFrames.fetch_add(frames); }
+
+    uint32_t droppedFrames() const { return _droppedFrames.load(); }
+    uint32_t oversizeFrames() const { return _oversizeFrames.load(); }
 
 private:
     char _frame[TELEMETRY_FRAME_MAX];
-    uint32_t _droppedFrames = 0;
-    uint32_t _oversizeFrames = 0;
+    std::atomic<uint32_t> _droppedFrames{0};
+    std::atomic<uint32_t> _oversizeFrames{0};
 };

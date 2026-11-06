@@ -34,6 +34,7 @@ struct MockLog {
 inline MockLog g_mockLog;
 
 inline void logInit() {}
+inline bool logStartWriter() { return true; }
 
 inline void logWrite(LogLevel level, const char* tag, const char* fmt, ...) {
     g_mockLog.total[static_cast<int>(level)]++;

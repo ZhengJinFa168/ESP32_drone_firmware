@@ -10,15 +10,17 @@
 // One logging API for every module: LOG_E / LOG_W / LOG_I / LOG_D(tag, printf-format, ...).
 // Output line: "[E][TAG] message\n".
 //
-// - Each line is formatted completely on the stack and written with a single call,
-//   so lines from different tasks (loopTask, async_tcp) never interleave.
+// - Each line is formatted completely on the caller's stack and handed over whole, so
+//   lines from different tasks (flight task, async_tcp) never interleave.
 // - No heap: a fixed-size stack buffer; longer messages are truncated, never overflow.
 // - The level filter is compile-time (FW_LOG_LEVEL): filtered calls cost nothing and
 //   their arguments are not evaluated.
 // - The implementation is chosen at compile time (platform layer or test mock), so
 //   logic modules can log without depending on the chip.
-// - Logging blocks until the line is queued for output: use it for state changes and
-//   errors, never per sample. High-rate output (telemetry) uses logTryWrite().
+// - After logStartWriter() logging never blocks: the line is queued for a writer task
+//   (ESP32: core 0) and dropped and counted if the queue is full. Before it, lines are
+//   written directly and may block. Either way: state changes and errors only, never
+//   per sample. High-rate output (telemetry) uses logTryWrite() from the writer task.
 
 enum class LogLevel : uint8_t {
     ERROR = 0,
@@ -71,11 +73,15 @@ inline size_t logFormatLine(char* buf, size_t cap, LogLevel level, const char* t
 }
 
 // --- Platform implementation (one per build) ---
-// logInit():       prepare the output (call once at boot, before anything logs)
-// logWrite():      format and write one line (blocks until queued)
-// logTryWrite():   write raw bytes only if they fit in the output buffer right now;
-//                  returns false (nothing written) instead of blocking
+// logInit():        prepare the output (call once at boot, before anything logs)
+// logStartWriter(): start the writer task; from then on logWrite() never blocks.
+//                   False (logged) = it could not start, logging stays direct
+// logWrite():       format one line and queue it (or write it directly before the
+//                   writer runs)
+// logTryWrite():    write raw bytes only if they fit in the output buffer right now;
+//                   returns false (nothing written) instead of blocking
 inline void logInit();
+inline bool logStartWriter();
 inline void logWrite(LogLevel level, const char* tag, const char* fmt, ...) __attribute__((format(printf, 3, 4)));
 inline bool logTryWrite(const char* data, size_t len);
 

@@ -1,6 +1,6 @@
 #pragma once
 
-// Must match .agents/rules/hardware_map.md (ground truth) and docs/wiring.jpg
+// Must match docs/hardware_map.md (ground truth) and docs/wiring.jpg
 
 // I2C – BMI270 IMU
 #define PIN_SDA     21

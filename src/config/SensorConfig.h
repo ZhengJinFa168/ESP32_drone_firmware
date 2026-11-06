@@ -6,7 +6,7 @@
 // ============================================
 // How the BMI270 is mounted relative to the drone body (FLU: X forward, Y left, Z up).
 // Determine it with the gravity test on the MOUNTED sensor
-// (see "End-of-Build Checklist" in .agents/rules/hardware_map.md).
+// (see "End-of-Build Checklist" in docs/hardware_map.md).
 constexpr AxisAlignment IMU_ALIGNMENT = Align::CW0;
 
 // SAFETY: a wrong alignment makes the controller correct tilt in the wrong

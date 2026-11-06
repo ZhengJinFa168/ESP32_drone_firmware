@@ -5,7 +5,7 @@
 ## Current State
 - **Phase**: Firmware Architecture Setup & Sensor Integration
 - **Working Components**: flight task on core 1 driven by the BMI270 data-ready interrupt (400 Hz, verified on hardware), core-0 serial writer task (queued non-blocking logging + telemetry formatting), Module base class, EventService (Pub/Sub), logging (`core/Log.h`), Teleplot telemetry (921600 baud, verified on hardware), gyro calibration at boot, Complementary Filter attitude estimator (time-constant based), BMI270 IMU module (I2C, switched power on G4 with power-cycle recovery, verified on hardware), WebSocket RC input module + web UI (arming verified end to end on hardware).
-- **Hardware**: Fully mapped in `.agents/rules/hardware_map.md` (ground truth) with diagram `docs/wiring.jpg`. `src/config/pins.h` matches it.
+- **Hardware**: Fully mapped in `docs/hardware_map.md` (ground truth) with diagram `docs/wiring.jpg`. `src/config/pins.h` matches it.
 - **Current Blockers**: None.
 - **Open Decisions**: IMU mounting alignment (decided at end of build, gates arming), ESC protocol (DShot300 recommended), propeller size, ADC pins for VBAT/CURR (must be ADC1: G33–G39, G32 is now IMU INT), motor spin directions.
 - **Known Issues / Next Up**:
@@ -118,7 +118,7 @@
   - Problem: `onWsEvent` runs on the `async_tcp` task (priority 10, any core) while `getRcData` runs on `loopTask` (priority 1, core 1). They shared `currentData`/`newDataAvailable` unsynchronized → torn reads and lost packets.
   - Fix: replaced with a length-1 FreeRTOS "mailbox" queue. Writer uses `xQueueOverwrite` (never blocks); reader uses non-blocking `xQueueReceive`. If queue creation fails, RC reports no data and the failsafe triggers.
   - Discussed alternatives: `portMUX` spinlock, mutex, seqlock (candidate for future flight-loop → telemetry handoff), and why `volatile` / `std::atomic<struct>` don't solve it.
-- **Hardware map** (`.agents/rules/hardware_map.md`): filled from the wiring diagram and parts list.
+- **Hardware map** (`docs/hardware_map.md`): filled from the wiring diagram and parts list.
   - Board: AZ-Delivery ESP32 DevKitC 38-pin (WROOM-32). Core 0 = WiFi/telemetry, Core 1 = flight loop.
   - Power: 4S 1550 mAh LiPo; UBEC 5V → ESP32 5V/GND; sensors on 3V3.
   - ESC: JHEMCU EM40A 4-in-1 BLHeli_S. Motors (Betaflight layout): M1 rear-right G13, M2 front-right G14, M3 rear-left G27, M4 front-left G26.
